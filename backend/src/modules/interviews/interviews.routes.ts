@@ -1,7 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
 import { authMiddleware, requireRole } from "../../shared/authMiddleware";
-import { startHandler, answerHandler, audioAnswerHandler, getSessionHandler } from "./interviews.controller";
 import { startHandler, answerHandler, audioAnswerHandler, getSessionHandler, proctoringHandler } from "./interviews.controller";
 
 const router = Router();

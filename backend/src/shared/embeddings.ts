@@ -35,7 +35,7 @@ Respond with ONLY a JSON array, no other text, in this exact format:
 Use "high", "medium", or "low" for importance. If there are no meaningful gaps, respond with an empty array [].`;
 
   const result = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-3.6-flash",
     contents: prompt,
   });
 
@@ -43,7 +43,6 @@ Use "high", "medium", or "low" for importance. If there are no meaningful gaps, 
   const cleaned = text.replace(/```json|```/g, "").trim();
   return JSON.parse(cleaned);
 }
-
 
 export async function generateNextQuestion(context: {
   resumeText: string;
@@ -71,7 +70,7 @@ ${history || "This is the first question."}
 
 Generate a new, different question — do not repeat previous topics. Respond with ONLY the question text, nothing else.`;
 
-  const result = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
+  const result = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
   return (result.text ?? "").trim();
 }
 
@@ -84,7 +83,7 @@ Candidate's Answer: ${answer}
 Respond with ONLY JSON in this exact format, no other text:
 {"score": 7, "feedback": "Brief 1-2 sentence feedback on strengths and weaknesses."}`;
 
-  const result = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
+  const result = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
   const text = result.text ?? '{"score":5,"feedback":"Unable to evaluate"}';
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
@@ -108,7 +107,7 @@ ${history}
 Respond with ONLY JSON in this exact format:
 {"summary": "2-3 sentence overview of performance, strengths and weaknesses.", "recommendation": "One of: Strongly Recommend, Recommend, Consider, Do Not Recommend — plus a brief reason."}`;
 
-  const result = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
+  const result = await ai.models.generateContent({ model: "gemini-3.6-flash", contents: prompt });
   const text = result.text ?? '{"summary":"","recommendation":""}';
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
@@ -117,7 +116,7 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Pr
   const base64Audio = audioBuffer.toString("base64");
 
   const result = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
+    model: "gemini-3.6-flash",
     contents: [
       { text: "Transcribe this audio exactly as spoken. Respond with ONLY the transcript text, no commentary." },
       { inlineData: { mimeType, data: base64Audio } },
@@ -126,6 +125,3 @@ export async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Pr
 
   return (result.text ?? "").trim();
 }
-
-
-

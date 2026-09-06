@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { uploadResume, listMyResumes } from "../../api/resumeApi";
 import Navbar from "../../components/common/Navbar";
 
@@ -44,9 +45,14 @@ export default function DashboardPage() {
       <div className="max-w-2xl mx-auto p-8">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold text-slate-900">Your resumes</h1>
-          <a href="/candidate/jobs" className="text-sm text-slate-600 hover:text-slate-900">
-            Browse jobs →
-          </a>
+          <div className="flex items-center gap-4">
+            <Link to="/candidate/applications" className="text-sm text-slate-600 hover:text-slate-900">
+              My applications →
+            </Link>
+            <Link to="/candidate/jobs" className="text-sm text-slate-600 hover:text-slate-900">
+              Browse jobs →
+            </Link>
+          </div>
         </div>
 
         <label className="block border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-slate-400 mb-8">

@@ -47,7 +47,11 @@ export async function listMyApplications(userId: string) {
 
   return prisma.application.findMany({
     where: { candidateId: candidate.id },
-    include: { jobPosting: true, skillGaps: true },
+    include: {
+      jobPosting: true,
+      skillGaps: true,
+      interviewSession: { include: { report: true } },
+    },
   });
 }
 
@@ -62,7 +66,12 @@ export async function listApplicantsForJob(userId: string, jobId: string) {
 
   return prisma.application.findMany({
     where: { jobId },
-    include: { candidate: true, resume: true, skillGaps: true },
+    include: {
+      candidate: true,
+      resume: true,
+      skillGaps: true,
+      interviewSession: { include: { proctoringEvents: true, report: true } },
+    },
   });
 }
 

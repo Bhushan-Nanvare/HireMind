@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { startInterview, submitAnswer, getSession } from "../../api/interviewsApi";
 import Navbar from "../../components/common/Navbar";
@@ -20,7 +20,14 @@ export default function InterviewPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => { begin(); }, []);
+  const hasStarted = useRef(false);
+
+  useEffect(() => {
+    if (!hasStarted.current) {
+      hasStarted.current = true;
+      begin();
+    }
+  }, []);
 
   useEffect(() => {
     if (!sessionId) return;

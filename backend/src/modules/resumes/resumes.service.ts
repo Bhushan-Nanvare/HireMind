@@ -10,15 +10,16 @@ export async function uploadResume(userId: string, file: Express.Multer.File) {
   const dataBuffer = fs.readFileSync(file.path);
   const parser = new PDFParse({ data: dataBuffer });
   const result = await parser.getText();
+  const parsedText = result.text;
   await parser.destroy();
 
-  const embedding = await generateEmbedding(result.text);
+  const embedding = await generateEmbedding(parsedText);
 
   const resume = await prisma.resume.create({
     data: {
       candidateId: candidate.id,
       fileUrl: file.path,
-      parsedText: result.text,
+      parsedText: parsedText,
       embedding,
     },
   });
