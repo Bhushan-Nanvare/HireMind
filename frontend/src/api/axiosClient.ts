@@ -25,4 +25,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-export default api;
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // An expired or invalid session: sign out and go to the login page. A wrong password on the
+    // login form is also a 401, but the form shows that error itself.
+    const isLoginRequest = error.config?.url?.includes("/auth/login");
+    if (error.response?.status === 401 && !isLoginRequest) {
+      useAuthStore.getState().logout();
+      if (window.location.pathname !== "/login") window.location.assign("/login");
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;

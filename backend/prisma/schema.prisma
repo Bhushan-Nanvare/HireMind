@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+  output   = "../generated/prisma"
 }
 
 datasource db {
@@ -8,25 +8,76 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id           String      @id @default(uuid())
-  email        String      @unique
-  passwordHash String
-  role         Role
-  createdAt    DateTime    @default(now())
-  candidate    Candidate?
-  recruiter    Recruiter?
-}
+// Statuses the app controls are database enums, so an invalid value can't be written. Values produced by the
+// AI (question difficulty, skill-gap importance) stay strings, since the model could return something new.
 
 enum Role {
   CANDIDATE
   RECRUITER
 }
 
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum JobStatus {
+  OPEN
+  CLOSED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SHORTLISTED
+  REJECTED
+}
+
+enum InterviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ProctoringEventType {
+  TAB_SWITCH
+  COPY_PASTE
+  PASTE_BLOCKED_IN_ANSWER
+  SUSPICIOUS_TYPING_SPEED
+}
+
+model User {
+  id                String      @id @default(uuid())
+  email             String      @unique
+  passwordHash      String
+  role              Role
+  createdAt         DateTime    @default(now())
+  /// Null until the user opens the link in their verification email
+  emailVerifiedAt   DateTime?
+  /// Sessions (JWTs) issued before this moment are rejected; set when the password is reset
+  passwordChangedAt DateTime?
+  candidate         Candidate?
+  recruiter         Recruiter?
+  authTokens        AuthToken[]
+}
+
+/// Single-use tokens sent in emails. Only a SHA-256 hash of the token is stored.
+model AuthToken {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  @@index([userId, type])
+}
+
 model Candidate {
   id           String        @id @default(uuid())
   userId       String        @unique
-  user         User          @relation(fields: [userId], references: [id])
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   fullName     String
   resumes      Resume[]
   applications Application[]
@@ -35,7 +86,7 @@ model Candidate {
 model Recruiter {
   id          String       @id @default(uuid())
   userId      String       @unique
-  user        User         @relation(fields: [userId], references: [id])
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   companyName String
   jobPostings JobPosting[]
 }
@@ -43,46 +94,62 @@ model Recruiter {
 model JobPosting {
   id           String        @id @default(uuid())
   recruiterId  String
-  recruiter    Recruiter     @relation(fields: [recruiterId], references: [id])
+  recruiter    Recruiter     @relation(fields: [recruiterId], references: [id], onDelete: Cascade)
   title        String
   description  String
-  status       String        @default("OPEN")
+  status       JobStatus     @default(OPEN)
   embedding    Float[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
   applications Application[]
+
+  @@index([recruiterId])
+  // The public job list: open jobs, newest first
+  @@index([status, createdAt])
 }
 
 model Resume {
   id           String        @id @default(uuid())
   candidateId  String
-  candidate    Candidate     @relation(fields: [candidateId], references: [id])
+  candidate    Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  /// Where the file is stored: "s3:<key>" in a bucket, or a path under uploads/ on local disk
   fileUrl      String
+  /// The name of the file as uploaded
+  fileName     String?
   parsedText   String?
   parsedSkills Json?
   embedding    Float[]
+  createdAt    DateTime      @default(now())
   applications Application[]
+
+  @@index([candidateId])
 }
 
 model Application {
   id               String            @id @default(uuid())
   candidateId      String
-  candidate        Candidate         @relation(fields: [candidateId], references: [id])
+  candidate        Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   jobId            String
-  jobPosting       JobPosting        @relation(fields: [jobId], references: [id])
+  jobPosting       JobPosting        @relation(fields: [jobId], references: [id], onDelete: Cascade)
   resumeId         String
-  resume           Resume            @relation(fields: [resumeId], references: [id])
+  resume           Resume            @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   matchScore       Float?
-  status           String            @default("APPLIED")
+  status           ApplicationStatus @default(APPLIED)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @default(now()) @updatedAt
   interviewSession InterviewSession?
   skillGaps        SkillGap[]
 
   @@unique([candidateId, jobId])
+  @@index([jobId])
+  @@index([resumeId])
 }
 
 model InterviewSession {
   id               String              @id @default(uuid())
   applicationId    String              @unique
-  application      Application         @relation(fields: [applicationId], references: [id])
-  status           String              @default("PENDING")
+  application      Application         @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  status           InterviewStatus     @default(PENDING)
   startedAt        DateTime?
   endedAt          DateTime?
   questions        InterviewQuestion[]
@@ -93,43 +160,57 @@ model InterviewSession {
 model InterviewQuestion {
   id           String           @id @default(uuid())
   sessionId    String
-  session      InterviewSession @relation(fields: [sessionId], references: [id])
+  session      InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   questionText String
+  /// easy | medium | hard, chosen from the previous answer's score
   difficulty   String
   orderIndex   Int
   answer       InterviewAnswer?
+
+  // Stops two concurrent requests from both creating "question N" for the same session
+  @@unique([sessionId, orderIndex])
 }
 
 model InterviewAnswer {
-  id         String            @id @default(uuid())
-  questionId String            @unique
-  question   InterviewQuestion @relation(fields: [questionId], references: [id])
-  answerText String
-  audioUrl   String?
-  score      Float?
+  id                String            @id @default(uuid())
+  questionId        String            @unique
+  question          InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answerText        String
+  /// Stored recording for voice answers, in the same format as Resume.fileUrl
+  audioUrl          String?
+  audioMimeType     String?
+  score             Float?
+  feedback          String?
+  aiLikelihoodScore Int?
+  createdAt         DateTime          @default(now())
 }
 
 model SkillGap {
   id            String      @id @default(uuid())
   applicationId String
-  application   Application @relation(fields: [applicationId], references: [id])
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   missingSkill  String
+  /// high | medium | low, as judged by the model
   importance    String
+
+  @@index([applicationId])
 }
 
 model Report {
   id             String           @id @default(uuid())
   sessionId      String           @unique
-  session        InterviewSession @relation(fields: [sessionId], references: [id])
+  session        InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   summary        String
   recommendation String
 }
 
 model ProctoringEvent {
-  id        String           @id @default(uuid())
+  id        String              @id @default(uuid())
   sessionId String
-  session   InterviewSession @relation(fields: [sessionId], references: [id])
-  eventType String
-  createdAt DateTime         @default(now())
-}
+  session   InterviewSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  eventType ProctoringEventType
+  metadata  Json?
+  createdAt DateTime            @default(now())
 
+  @@index([sessionId])
+}

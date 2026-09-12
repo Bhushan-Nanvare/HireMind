@@ -1,0 +1,13 @@
+// Type-checks everything the build leaves out: tests, the seed script and the vitest config.
+// Vitest runs these through Vite, so module resolution is "bundler" here rather than Node's.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"]
+  },
+  "include": ["src", "tests", "prisma", "vitest.config.mts"]
+}

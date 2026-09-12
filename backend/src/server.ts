@@ -1,9 +1,17 @@
 import dotenv from "dotenv";
 dotenv.config({ override: true });
 
-import app from "./app";
+import { createApp } from "./app";
+import { loadEnv } from "./shared/env";
+import { logger } from "./shared/logger";
 
-const PORT = process.env.PORT || 5000;
+// Exits with a list of problems if anything required is missing or malformed
+const env = loadEnv();
 
-console.log(`[startup] JWT_SECRET loaded: ${process.env.JWT_SECRET ? process.env.JWT_SECRET.slice(0, 6) + "..." : "NOT SET — using fallback!"}`);
-app.listen(PORT, () => console.log(` Server running on http://localhost:${PORT}`));
+createApp().listen(env.PORT, () => {
+  logger.info("Server started", {
+    url: `http://localhost:${env.PORT}`,
+    environment: env.NODE_ENV,
+    storage: env.STORAGE_DRIVER,
+  });
+});

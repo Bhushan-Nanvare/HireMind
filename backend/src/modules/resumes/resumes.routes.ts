@@ -1,12 +1,14 @@
 import { Router } from "express";
-import multer from "multer";
 import { authMiddleware, requireRole } from "../../shared/authMiddleware";
-import { uploadHandler, listHandler } from "./resumes.controller";
+import { aiLimiter } from "../../shared/rateLimits";
+import { resumeUpload } from "../../shared/uploads";
+import { uploadHandler, listHandler, fileHandler, deleteHandler } from "./resumes.controller";
 
-const upload = multer({ dest: "uploads/resumes/" });
 const router = Router();
 
-router.post("/upload", authMiddleware, requireRole("CANDIDATE"), upload.single("resume"), uploadHandler);
+router.post("/upload", authMiddleware, requireRole("CANDIDATE"), aiLimiter, resumeUpload.single("resume"), uploadHandler);
 router.get("/mine", authMiddleware, requireRole("CANDIDATE"), listHandler);
+router.get("/:id/file", authMiddleware, requireRole("CANDIDATE"), fileHandler);
+router.delete("/:id", authMiddleware, requireRole("CANDIDATE"), deleteHandler);
 
 export default router;
