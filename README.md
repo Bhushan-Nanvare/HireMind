@@ -1,4 +1,4 @@
-# HireMind AI
+# HireMind
 
 AI-assisted hiring: candidates apply with a resume and take a short adaptive interview; recruiters get a
 ranked shortlist with transcripts, scores and integrity signals to review.
