@@ -58,7 +58,7 @@ With `npm run seed`, log in as `demo-recruiter@hiremind.test` or `demo-candidate
 | Variable | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | yes | PostgreSQL connection string |
-| `JWT_SECRET` | yes | 32+ random characters. The server refuses to start without it |
+| `JWT_SECRET` | yes |  The server refuses to start without it |
 | `GEMINI_API_KEY` | yes in production | Without it, matching and interviews fail |
 | `PORT` | no | Defaults to 5000 |
 | `CORS_ORIGINS` | yes in production | Comma-separated browser origins, e.g. your Vercel URL |
