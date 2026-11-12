@@ -11,6 +11,17 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npx tsc
 
+# Dev only. Source is bind-mounted at runtime; tsx watch handles reload.
+# Kept above the production stage so an untargeted build still produces production.
+FROM node:22-alpine AS dev
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 5000
+CMD ["npm", "run", "dev"]
+
 FROM node:22-alpine
 WORKDIR /app
 RUN apk add --no-cache openssl
