@@ -4,7 +4,21 @@ export interface InterviewQuestion {
   id: string;
   questionText: string;
   difficulty: string;
+  /** 0 for the unscored warm-up; scored questions start at 1. */
   orderIndex: number;
+  isWarmUp: boolean;
+  /** Rendered hidden inside the question. Null on the warm-up. */
+  canaryToken: string | null;
+  timeLimitSeconds: number;
+}
+
+/** How a spoken answer was delivered, measured in the browser. */
+export interface VoiceMetrics {
+  latencyMs?: number;
+  speakingMs?: number;
+  wordCount?: number;
+  longPauses?: number;
+  edited?: boolean;
 }
 
 export interface InterviewReport {
@@ -23,8 +37,9 @@ export interface InterviewState {
 }
 
 export interface AnswerResult extends InterviewState {
-  score: number;
-  feedback: string;
+  /** Null for the warm-up, which is never scored. */
+  score: number | null;
+  feedback: string | null;
 }
 
 /** The interview for an application without starting it. `interview` is null until the candidate starts. */
@@ -46,6 +61,7 @@ export interface InterviewTranscript {
     questionText: string;
     difficulty: string;
     orderIndex: number;
+    isWarmUp: boolean;
     answer: { answerText: string; score: number | null; feedback: string | null; isVoice: boolean } | null;
   }[];
 }
@@ -83,6 +99,45 @@ export async function submitAudioAnswer(
   const form = new FormData();
   form.append("questionId", questionId);
   form.append("audio", recording, fileName);
+  const res = await api.post(`/interviews/${sessionId}/answer-audio`, form);
+  return res.data.data;
+}
+
+/**
+ * A spoken answer the browser transcribed itself. The recording is uploaded alongside the transcript
+ * so the recruiter can hear it, and so the API never has to pay for a second transcription.
+ */
+export async function submitSpokenAnswer(
+  sessionId: string,
+  questionId: string,
+  payload: {
+    answerText: string;
+    rawTranscript: string;
+    metrics: VoiceMetrics;
+    recording: Blob | null;
+    fileName: string;
+    timeTakenSeconds: number;
+  }
+): Promise<AnswerResult> {
+  // Without a recording there's nothing to upload, so the plain JSON endpoint does
+  if (!payload.recording) {
+    const res = await api.post(`/interviews/${sessionId}/answer`, {
+      questionId,
+      answerText: payload.answerText,
+      timeTakenSeconds: payload.timeTakenSeconds,
+      rawTranscript: payload.rawTranscript,
+      voiceMetrics: payload.metrics,
+    });
+    return res.data.data;
+  }
+
+  const form = new FormData();
+  form.append("questionId", questionId);
+  form.append("transcript", payload.answerText);
+  form.append("rawTranscript", payload.rawTranscript);
+  form.append("timeTakenSeconds", String(payload.timeTakenSeconds));
+  form.append("voiceMetrics", JSON.stringify(payload.metrics));
+  form.append("audio", payload.recording, payload.fileName);
   const res = await api.post(`/interviews/${sessionId}/answer-audio`, form);
   return res.data.data;
 }

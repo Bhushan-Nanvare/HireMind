@@ -151,6 +151,11 @@ export function SignalList({ signals }: { signals: SignalSummary }) {
     signals.pastes > 0 && `${plural(signals.pastes, "copy or paste", "copies or pastes")} on the page`,
     signals.blockedPastes > 0 && `${plural(signals.blockedPastes, "blocked paste")} into the answer box`,
     signals.fastTyping > 0 && `${plural(signals.fastTyping, "answer")} typed unusually fast`,
+    signals.canaryTriggers > 0 &&
+      `${plural(signals.canaryTriggers, "answer")} repeated text hidden in the question, which is only visible to a language model`,
+    signals.heavyEdits > 0 &&
+      `${plural(signals.heavyEdits, "spoken answer")} rewritten rather than corrected after being transcribed`,
+    signals.overTime > 0 && `${plural(signals.overTime, "answer")} took longer than the suggested time`,
     signals.averageAiLikeness !== null && `Average AI-likeness estimate: ${signals.averageAiLikeness}%`,
   ].filter((line): line is string => typeof line === "string");
 

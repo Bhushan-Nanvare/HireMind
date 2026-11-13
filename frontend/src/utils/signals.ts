@@ -3,6 +3,11 @@ export interface SignalSummary {
   pastes: number;
   blockedPastes: number;
   fastTyping: number;
+  /** Answers repeating text hidden in the question, which only a model would have seen */
+  canaryTriggers: number;
+  overTime: number;
+  /** Transcripts replaced rather than corrected after the candidate spoke */
+  heavyEdits: number;
   /** Average AI-likeness estimate across scored answers, or null if none were scored */
   averageAiLikeness: number | null;
 }
@@ -25,6 +30,9 @@ export function summarizeSignals(
     pastes: count("COPY_PASTE"),
     blockedPastes: count("PASTE_BLOCKED_IN_ANSWER"),
     fastTyping: count("SUSPICIOUS_TYPING_SPEED"),
+    canaryTriggers: count("CANARY_TRIGGERED"),
+    overTime: count("ANSWER_TIME_EXCEEDED"),
+    heavyEdits: count("TRANSCRIPT_HEAVILY_EDITED"),
     averageAiLikeness: scores.length ? Math.round(scores.reduce((sum, s) => sum + s, 0) / scores.length) : null,
   };
 }

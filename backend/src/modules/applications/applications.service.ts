@@ -177,6 +177,7 @@ export async function getApplicationForRecruiter(userId: string, applicationId: 
               orderIndex: true,
               questionText: true,
               difficulty: true,
+              isWarmUp: true,
               answer: {
                 select: {
                   id: true,
@@ -185,6 +186,8 @@ export async function getApplicationForRecruiter(userId: string, applicationId: 
                   feedback: true,
                   aiLikelihoodScore: true,
                   audioUrl: true,
+                  rawTranscript: true,
+                  voiceMetrics: true,
                   createdAt: true,
                 },
               },
@@ -216,6 +219,9 @@ export async function getApplicationForRecruiter(userId: string, applicationId: 
           aiLikelihoodScore: answer.aiLikelihoodScore,
           createdAt: answer.createdAt,
           isVoice: answer.audioUrl !== null,
+          // What the recogniser heard, so the recruiter can compare it with what was submitted
+          rawTranscript: answer.rawTranscript,
+          voiceMetrics: answer.voiceMetrics,
         },
       })),
     },

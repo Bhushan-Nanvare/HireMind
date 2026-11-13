@@ -43,6 +43,10 @@ enum ProctoringEventType {
   COPY_PASTE
   PASTE_BLOCKED_IN_ANSWER
   SUSPICIOUS_TYPING_SPEED
+  CANARY_TRIGGERED
+  ANSWER_TIME_EXCEEDED
+  TRANSCRIPT_HEAVILY_EDITED
+  SPEECH_PATTERN_ANOMALY
 }
 
 model User {
@@ -165,6 +169,10 @@ model InterviewQuestion {
   /// easy | medium | hard, chosen from the previous answer's score
   difficulty   String
   orderIndex   Int
+  /// The unscored opening question, used only as a baseline for speech analysis. Always orderIndex 0.
+  isWarmUp     Boolean          @default(false)
+  /// Hidden instruction only a model reading the question would act on; see checkCanary()
+  canaryToken  String?
   answer       InterviewAnswer?
 
   // Stops two concurrent requests from both creating "question N" for the same session
@@ -182,6 +190,10 @@ model InterviewAnswer {
   score             Float?
   feedback          String?
   aiLikelihoodScore Int?
+  /// What speech recognition heard, before the candidate edited it. Null for typed answers.
+  rawTranscript     String?
+  /// Timing and pacing of a spoken answer: latency, speech rate, pauses, edit distance
+  voiceMetrics      Json?
   createdAt         DateTime          @default(now())
 }
 
