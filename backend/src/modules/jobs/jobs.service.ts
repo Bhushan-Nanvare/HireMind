@@ -1,5 +1,6 @@
 import { prisma } from "../../shared/prisma";
 import { generateEmbedding } from "../../shared/embeddings";
+import { bestMatch, toMatchPercent } from "../../shared/matching";
 import { conflict, notFound } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 
@@ -121,4 +122,55 @@ export async function getJobById(jobId: string) {
   const job = await prisma.jobPosting.findUnique({ where: { id: jobId }, select: publicJobSelect });
   if (!job) throw notFound("Job not found");
   return job;
+}
+
+const POOL_RESULTS = 20;
+
+/**
+ * Ranks every candidate who has uploaded a resume against this job, with the resume section that
+ * matched. Contact details are deliberately withheld unless the candidate applied: a resume uploaded
+ * to apply for one job isn't consent to be contacted about every other.
+ */
+export async function searchCandidatePool(userId: string, jobId: string) {
+  const recruiterId = await getRecruiterId(userId);
+  const job = await prisma.jobPosting.findUnique({
+    where: { id: jobId },
+    select: { recruiterId: true, title: true, description: true, embedding: true },
+  });
+  if (!job || job.recruiterId !== recruiterId) throw notFound("Job not found or doesn't belong to you");
+
+  let jobEmbedding = job.embedding;
+  if (jobEmbedding.length === 0) {
+    jobEmbedding = await generateEmbedding(jobEmbeddingText(job));
+    await prisma.jobPosting.update({ where: { id: jobId }, data: { embedding: jobEmbedding } });
+  }
+
+  const resumes = await prisma.resume.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      embedding: true,
+      chunks: { select: { text: true, embedding: true } },
+      candidate: { select: { id: true, fullName: true } },
+      applications: { where: { jobId }, select: { id: true } },
+    },
+  });
+
+  const bestPerCandidate = new Map<string, { candidateId: string; fullName: string; matchScore: number; evidence: string | null; applicationId: string | null }>();
+  for (const resume of resumes) {
+    const match = bestMatch(jobEmbedding, resume);
+    if (!match) continue;
+
+    const existing = bestPerCandidate.get(resume.candidate.id);
+    if (existing && existing.matchScore >= toMatchPercent(match.score)) continue;
+
+    bestPerCandidate.set(resume.candidate.id, {
+      candidateId: resume.candidate.id,
+      fullName: resume.candidate.fullName,
+      matchScore: toMatchPercent(match.score),
+      evidence: match.evidence,
+      applicationId: resume.applications[0]?.id ?? null,
+    });
+  }
+
+  return [...bestPerCandidate.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, POOL_RESULTS);
 }

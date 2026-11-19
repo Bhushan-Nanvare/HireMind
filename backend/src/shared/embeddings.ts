@@ -131,6 +131,24 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   });
 }
 
+/** Embeds several texts in one request, keeping the order of the input. */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  const inputs = texts.map((text) => text.trim().slice(0, 8000)).filter(Boolean);
+  if (inputs.length === 0) return [];
+
+  return withRetries("embedding", async () => {
+    const result = await getClient().models.embedContent({ model: EMBEDDING_MODEL, contents: inputs });
+    const embeddings = result.embeddings ?? [];
+    if (embeddings.length !== inputs.length) throw new InvalidResponseError("Wrong number of embeddings");
+
+    return embeddings.map((embedding) => {
+      const values = embedding.values;
+      if (!values?.length) throw new InvalidResponseError("Empty embedding");
+      return values;
+    });
+  });
+}
+
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length === 0 || a.length !== b.length) {
     throw new Error(`Cannot compare embeddings of different sizes (${a.length} vs ${b.length})`);

@@ -9,6 +9,7 @@ import {
   updateHandler,
   statusHandler,
   deleteHandler,
+  candidatePoolHandler,
 } from "./jobs.controller";
 
 const router = Router();
@@ -16,6 +17,8 @@ const router = Router();
 // Creating or editing a job generates an embedding, so both count toward the AI limit
 router.post("/", authMiddleware, requireRole("RECRUITER"), requireVerifiedEmail, aiLimiter, createHandler);
 router.get("/mine", authMiddleware, requireRole("RECRUITER"), listMineHandler);
+// Embeds the job if it has no embedding yet, so it counts toward the AI limit
+router.get("/:id/candidates", authMiddleware, requireRole("RECRUITER"), aiLimiter, candidatePoolHandler);
 router.patch("/:id", authMiddleware, requireRole("RECRUITER"), aiLimiter, updateHandler);
 router.patch("/:id/status", authMiddleware, requireRole("RECRUITER"), statusHandler);
 router.delete("/:id", authMiddleware, requireRole("RECRUITER"), deleteHandler);

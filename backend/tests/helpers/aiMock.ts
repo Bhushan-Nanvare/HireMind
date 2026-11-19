@@ -41,6 +41,7 @@ export function embeddingsMock() {
     AiServiceError,
     cosineSimilarity: cosine,
     generateEmbedding: vi.fn(async (text: string) => fakeEmbedding(text)),
+    generateEmbeddings: vi.fn(async (texts: string[]) => texts.map(fakeEmbedding)),
     generateSkillGaps: vi.fn(async () => [
       { skill: "Kubernetes", importance: "high" as const },
       { skill: "GraphQL", importance: "medium" as const },

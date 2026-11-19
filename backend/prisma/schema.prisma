@@ -125,8 +125,21 @@ model Resume {
   embedding    Float[]
   createdAt    DateTime      @default(now())
   applications Application[]
+  chunks       ResumeChunk[]
 
   @@index([candidateId])
+}
+
+/// A section of a resume, embedded on its own so a search can point at what actually matched.
+model ResumeChunk {
+  id         String  @id @default(uuid())
+  resumeId   String
+  resume     Resume  @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  text       String
+  orderIndex Int
+  embedding  Float[]
+
+  @@index([resumeId])
 }
 
 model Application {

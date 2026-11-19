@@ -2,7 +2,8 @@ import fs from "fs";
 import path from "path";
 import { PDFParse } from "pdf-parse";
 import { prisma } from "../../shared/prisma";
-import { generateEmbedding } from "../../shared/embeddings";
+import { splitIntoChunks } from "../../shared/chunk";
+import { generateEmbedding, generateEmbeddings } from "../../shared/embeddings";
 import { badRequest, conflict, notFound } from "../../shared/errors";
 import { removeStoredFile } from "../../shared/files";
 import { storeUpload } from "../../shared/storage";
@@ -73,13 +74,30 @@ export async function uploadResume(userId: string, file: { path: string; origina
     throw badRequest("No text could be read from this PDF. Scanned or image-only resumes aren't supported.");
   }
 
-  const embedding = await generateEmbedding(parsedText);
+  const chunkTexts = splitIntoChunks(parsedText);
+  const [embedding, chunkEmbeddings] = await Promise.all([
+    generateEmbedding(parsedText),
+    generateEmbeddings(chunkTexts),
+  ]);
   const fileName = cleanFileName(file.originalname);
   const storedFile = await storeUpload(file.path, { folder: "resumes", contentType: "application/pdf", fileName });
 
   try {
     const resume = await prisma.resume.create({
-      data: { candidateId, fileUrl: storedFile, fileName, parsedText, embedding },
+      data: {
+        candidateId,
+        fileUrl: storedFile,
+        fileName,
+        parsedText,
+        embedding,
+        chunks: {
+          create: chunkEmbeddings.map((chunkEmbedding, index) => ({
+            text: chunkTexts[index] ?? "",
+            orderIndex: index,
+            embedding: chunkEmbedding,
+          })),
+        },
+      },
       select: summarySelect,
     });
     return toSummary(resume);

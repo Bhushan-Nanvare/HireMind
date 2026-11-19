@@ -57,3 +57,18 @@ export async function setJobStatus(jobId: string, status: JobStatus): Promise<Ow
 export async function deleteJob(jobId: string): Promise<void> {
   await api.delete(`/jobs/${jobId}`);
 }
+
+export interface PoolCandidate {
+  candidateId: string;
+  fullName: string;
+  matchScore: number;
+  /** The resume section that matched, or null for resumes uploaded before chunking. */
+  evidence: string | null;
+  /** Set when this candidate already applied to the job, so the recruiter can open their application. */
+  applicationId: string | null;
+}
+
+export async function searchCandidatePool(jobId: string): Promise<PoolCandidate[]> {
+  const res = await api.get(`/jobs/${jobId}/candidates`);
+  return res.data.data;
+}

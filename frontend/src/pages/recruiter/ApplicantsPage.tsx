@@ -6,6 +6,7 @@ import {
   type Applicant,
   type ApplicationStatus,
 } from "../../api/applicationsApi";
+import CandidatePool from "../../components/recruiter/CandidatePool";
 import StatusActions from "../../components/recruiter/StatusActions";
 import { buttonSecondary, inputClass } from "../../components/common/styles";
 import {
@@ -194,6 +195,8 @@ export default function ApplicantsPage() {
           )}
         </>
       )}
+
+      <CandidatePool jobId={jobId} />
     </>
   );
 }

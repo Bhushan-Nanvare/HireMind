@@ -47,3 +47,8 @@ export async function deleteHandler(req: AuthRequest, res: Response) {
   await jobsService.deleteJob(req.user!.userId, getParam(req, "id"));
   res.json({ success: true });
 }
+
+export async function candidatePoolHandler(req: AuthRequest, res: Response) {
+  const candidates = await jobsService.searchCandidatePool(req.user!.userId, getParam(req, "id"));
+  res.json({ success: true, data: candidates });
+}

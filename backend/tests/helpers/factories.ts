@@ -55,7 +55,10 @@ export async function createJob(
 }
 
 /** A resume as if it had been uploaded and embedded earlier. */
-export async function seedResume(candidate: TestUser, overrides: { fileName?: string; fileUrl?: string } = {}) {
+export async function seedResume(
+  candidate: TestUser,
+  overrides: { fileName?: string; fileUrl?: string; chunks?: { text: string; embedding: number[] }[] } = {}
+) {
   return prisma.resume.create({
     data: {
       candidateId: candidate.profileId,
@@ -63,6 +66,15 @@ export async function seedResume(candidate: TestUser, overrides: { fileName?: st
       fileName: overrides.fileName ?? "Test CV.pdf",
       parsedText: "Backend developer with Node.js, TypeScript, PostgreSQL and Redis experience.",
       embedding: fakeStoredEmbedding(),
+      ...(overrides.chunks && {
+        chunks: {
+          create: overrides.chunks.map((chunk, index) => ({
+            text: chunk.text,
+            orderIndex: index,
+            embedding: chunk.embedding,
+          })),
+        },
+      }),
     },
   });
 }

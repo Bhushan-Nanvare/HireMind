@@ -147,3 +147,87 @@ describe("managing your own jobs", () => {
     expect((await api.get("/api/jobs/mine").set(auth(other.token))).body.data).toEqual([]);
   });
 });
+
+describe("searching the candidate pool", () => {
+  async function jobEmbedding(jobId: string) {
+    const job = await prisma.jobPosting.findUniqueOrThrow({ where: { id: jobId }, select: { embedding: true } });
+    return job.embedding;
+  }
+
+  it("ranks candidates by their best matching resume section", async () => {
+    const recruiter = await createUser("RECRUITER", "Acme Corp");
+    const job = await createJob(recruiter);
+    const target = await jobEmbedding(job.id);
+
+    const strong = await createUser("CANDIDATE", "Strong Match");
+    await seedResume(strong, {
+      chunks: [
+        { text: "Volunteering at a dog shelter on weekends.", embedding: target.map((value) => -value) },
+        { text: "Five years building Node.js services on PostgreSQL.", embedding: target },
+      ],
+    });
+
+    const weak = await createUser("CANDIDATE", "Weak Match");
+    await seedResume(weak, {
+      chunks: [{ text: "Mostly front-end design work in Figma.", embedding: target.map((value) => -value) }],
+    });
+
+    const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0]).toMatchObject({
+      fullName: "Strong Match",
+      matchScore: 100,
+      evidence: "Five years building Node.js services on PostgreSQL.",
+      applicationId: null,
+    });
+    expect(res.body.data[1].fullName).toBe("Weak Match");
+    expect(res.body.data[0].matchScore).toBeGreaterThan(res.body.data[1].matchScore);
+  });
+
+  it("never exposes contact details", async () => {
+    const recruiter = await createUser("RECRUITER", "Acme Corp");
+    const job = await createJob(recruiter);
+    const candidate = await createUser("CANDIDATE", "Casey");
+    await seedResume(candidate, { chunks: [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }] });
+
+    const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
+
+    expect(JSON.stringify(res.body.data)).not.toContain(candidate.email);
+  });
+
+  it("links through to the application when the candidate already applied", async () => {
+    const recruiter = await createUser("RECRUITER", "Acme Corp");
+    const job = await createJob(recruiter);
+    const candidate = await createUser("CANDIDATE", "Casey");
+    const resume = await seedResume(candidate, {
+      chunks: [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }],
+    });
+    const application = await seedApplication(candidate, job.id, resume.id);
+
+    const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
+
+    expect(res.body.data[0].applicationId).toBe(application.id);
+  });
+
+  it("still ranks resumes uploaded before chunking existed", async () => {
+    const recruiter = await createUser("RECRUITER", "Acme Corp");
+    const job = await createJob(recruiter);
+    const candidate = await createUser("CANDIDATE", "Legacy");
+    await seedResume(candidate);
+
+    const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
+
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].evidence).toBeNull();
+  });
+
+  it("keeps other recruiters out", async () => {
+    const owner = await createUser("RECRUITER", "Acme Corp");
+    const job = await createJob(owner);
+    const other = await createUser("RECRUITER", "Rival Ltd");
+
+    expect((await api.get(`/api/jobs/${job.id}/candidates`).set(auth(other.token))).status).toBe(404);
+  });
+});
