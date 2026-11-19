@@ -1,0 +1,104 @@
+[
+  {
+    "name": "Senior backend engineer",
+    "job": {
+      "title": "Senior Backend Engineer",
+      "description": "Build and run our order processing APIs. Node.js and TypeScript, PostgreSQL with careful transaction handling, and Redis for caching and queues. You will own schema design, migrations and production debugging. Kubernetes experience is a plus."
+    },
+    "resumes": [
+      {
+        "id": "node-postgres-senior",
+        "relevance": 3,
+        "text": "Senior Backend Engineer, Flowmart, 2021 to present\nOwned the order service in Node.js and TypeScript serving 4k requests per second.\nDesigned the PostgreSQL schema and wrote zero downtime migrations for a 200 million row table.\nIntroduced Redis caching and a job queue, cutting p99 latency from 800ms to 120ms.\nOn call rotation, led three production incident postmortems.\nEarlier: Backend Engineer at Dessa, Express and MySQL."
+      },
+      {
+        "id": "python-backend",
+        "relevance": 2,
+        "text": "Backend Engineer, Larkfield, 2020 to present\nBuilt internal REST APIs in Python with FastAPI and PostgreSQL.\nManaged Alembic migrations and tuned slow queries with EXPLAIN ANALYZE.\nUsed Celery and Redis for background jobs.\nSome exposure to Node.js on a side project."
+      },
+      {
+        "id": "devops",
+        "relevance": 1,
+        "text": "Platform Engineer, Northwind, 2019 to present\nRan Kubernetes clusters on AWS with Terraform and Helm.\nBuilt CI pipelines in GitHub Actions for twelve services.\nWrote Go tooling for cluster maintenance.\nSupported backend teams with database failover drills."
+      },
+      {
+        "id": "frontend",
+        "relevance": 0,
+        "text": "Frontend Engineer, Peartree, 2021 to present\nBuilt React and TypeScript interfaces with Tailwind CSS.\nImproved Lighthouse scores and accessibility across the marketing site.\nDesign system work in Figma and Storybook.\nNo server side ownership."
+      },
+      {
+        "id": "marketing",
+        "relevance": 0,
+        "text": "Marketing Manager, Bellhaven, 2018 to present\nRan paid acquisition campaigns across search and social.\nManaged a team of four and a six figure annual budget.\nBuilt reporting dashboards in Looker.\nDegree in Business Administration."
+      }
+    ]
+  },
+  {
+    "name": "Data engineer",
+    "job": {
+      "title": "Data Engineer",
+      "description": "Own our analytics pipelines. Build batch and streaming ingestion with Airflow and Spark, model data in dbt on Snowflake, and keep data quality checks green. Strong SQL required. Python preferred."
+    },
+    "resumes": [
+      {
+        "id": "airflow-dbt",
+        "relevance": 3,
+        "text": "Data Engineer, Castleton Analytics, 2020 to present\nBuilt and maintained forty Airflow DAGs ingesting into Snowflake.\nModelled the warehouse in dbt with tests and exposures.\nWrote PySpark jobs for nightly aggregation over billions of rows.\nSet up Great Expectations data quality checks and alerting."
+      },
+      {
+        "id": "analyst-sql",
+        "relevance": 2,
+        "text": "Analytics Engineer, Redgate Retail, 2021 to present\nWrote complex SQL for reporting across Snowflake and BigQuery.\nMaintained dbt models and documentation for the finance domain.\nBuilt dashboards in Looker used by the leadership team.\nSome Python scripting for ad hoc extracts."
+      },
+      {
+        "id": "node-postgres-senior-2",
+        "relevance": 1,
+        "text": "Backend Engineer, Flowmart, 2021 to present\nNode.js and TypeScript services backed by PostgreSQL.\nWrote reporting queries and nightly export jobs.\nRedis caching and queue processing.\nNo warehouse or Spark experience."
+      },
+      {
+        "id": "mobile",
+        "relevance": 0,
+        "text": "iOS Engineer, Tidepool, 2019 to present\nShipped Swift and SwiftUI features to two million users.\nOwned offline sync and Core Data migrations.\nReduced crash rate from 1.2 percent to 0.2 percent.\nMentored two junior engineers."
+      },
+      {
+        "id": "support",
+        "relevance": 0,
+        "text": "Customer Support Lead, Harrowgate, 2017 to present\nManaged a support queue of 400 tickets per week.\nWrote help centre documentation and macros.\nRan onboarding for new support hires.\nZendesk and Intercom administration."
+      }
+    ]
+  },
+  {
+    "name": "Frontend engineer",
+    "job": {
+      "title": "Frontend Engineer",
+      "description": "Build our customer facing web app in React and TypeScript. You will own component architecture, accessibility, and performance. Experience with design systems and testing is important. Backend work is occasional and optional."
+    },
+    "resumes": [
+      {
+        "id": "react-design-system",
+        "relevance": 3,
+        "text": "Frontend Engineer, Peartree, 2021 to present\nBuilt the component library in React and TypeScript used by six product teams.\nDrove accessibility to WCAG 2.1 AA across the app and fixed 90 audit issues.\nCut bundle size by 40 percent with code splitting and lazy routes.\nWrote Playwright and Testing Library suites covering critical flows."
+      },
+      {
+        "id": "fullstack",
+        "relevance": 2,
+        "text": "Full Stack Developer, Ashby Labs, 2020 to present\nBuilt React front ends and Node.js APIs for internal tools.\nUsed TypeScript throughout and Jest for unit tests.\nSome design system work with Chakra UI.\nAlso handled PostgreSQL schema changes."
+      },
+      {
+        "id": "vue",
+        "relevance": 1,
+        "text": "Frontend Developer, Mullion, 2019 to present\nBuilt single page applications in Vue 3 and JavaScript.\nIntegrated REST APIs and handled client side state with Pinia.\nImproved page load times on the storefront.\nNo React experience in a production role."
+      },
+      {
+        "id": "node-postgres-senior-3",
+        "relevance": 0,
+        "text": "Senior Backend Engineer, Flowmart, 2021 to present\nOwned order processing APIs in Node.js and TypeScript.\nPostgreSQL schema design and zero downtime migrations.\nRedis caching and queue processing at scale.\nNo front end ownership."
+      },
+      {
+        "id": "marketing-2",
+        "relevance": 0,
+        "text": "Marketing Manager, Bellhaven, 2018 to present\nRan paid acquisition campaigns across search and social.\nManaged a team of four.\nBuilt reporting dashboards in Looker.\nDegree in Business Administration."
+      }
+    ]
+  }
+]
