@@ -53,6 +53,14 @@ export interface ApplicantList {
   applicants: Applicant[];
 }
 
+export interface AnswerVoiceMetrics {
+  latencyMs?: number;
+  speakingMs?: number;
+  wordCount?: number;
+  longPauses?: number;
+  edited?: boolean;
+}
+
 export interface TranscriptAnswer {
   id: string;
   answerText: string;
@@ -61,6 +69,9 @@ export interface TranscriptAnswer {
   aiLikelihoodScore: number | null;
   createdAt: string;
   isVoice: boolean;
+  /** What speech recognition heard, before the candidate edited it. Null for typed answers. */
+  rawTranscript: string | null;
+  voiceMetrics: AnswerVoiceMetrics | null;
 }
 
 /** Everything the recruiter's applicant page shows */

@@ -8,6 +8,7 @@ import {
   type ApplicationStatus,
 } from "../../api/applicationsApi";
 import StatusActions from "../../components/recruiter/StatusActions";
+import TranscriptDiff from "../../components/recruiter/TranscriptDiff";
 import { buttonSecondary } from "../../components/common/styles";
 import {
   ApplicationStatusBadge,
@@ -215,6 +216,13 @@ export default function ApplicantDetailPage() {
                       <p className="whitespace-pre-line text-sm text-slate-700">{question.answer.answerText}</p>
                       {question.answer.isVoice && (
                         <RecordingPlayer applicationId={application.id} answerId={question.answer.id} />
+                      )}
+                      {question.answer.rawTranscript && (
+                        <TranscriptDiff
+                          rawTranscript={question.answer.rawTranscript}
+                          answerText={question.answer.answerText}
+                          metrics={question.answer.voiceMetrics}
+                        />
                       )}
                       {question.answer.feedback && <p className="text-sm text-slate-500">{question.answer.feedback}</p>}
                     </div>
