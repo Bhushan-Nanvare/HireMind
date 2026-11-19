@@ -10,6 +10,7 @@ import { createJob, createUser, seedApplication, seedResume, type TestUser } fro
 
 const LONG_ANSWER = "I built an orders service in Express with PostgreSQL, using transactions for the writes that mattered.";
 const SHORT_ANSWER = "Not much.";
+const WARM_UP_ANSWER = "Last month I put together a small tool for tracking stock levels.";
 
 beforeEach(async () => {
   await resetDatabase();
@@ -32,6 +33,13 @@ const start = (candidate: TestUser, applicationId: string) =>
 const answer = (candidate: TestUser, sessionId: string, questionId: string, answerText: string, timeTakenSeconds = 90) =>
   api.post(`/api/interviews/${sessionId}/answer`).set(auth(candidate.token)).send({ questionId, answerText, timeTakenSeconds });
 
+/** Starts the interview and clears the unscored warm-up, so the first scored question is open. */
+async function startAtFirstScored(candidate: TestUser, applicationId: string) {
+  const warmUp = (await start(candidate, applicationId)).body.data;
+  const res = await answer(candidate, warmUp.session.id, warmUp.question.id, WARM_UP_ANSWER);
+  return res.body.data;
+}
+
 describe("starting and resuming", () => {
   it("reports no interview until the candidate starts", async () => {
     const { candidate, applicationId } = await readyToInterview();
@@ -43,18 +51,32 @@ describe("starting and resuming", () => {
     expect(ai.generateNextQuestion).not.toHaveBeenCalled();
   });
 
-  it("creates the first question, and returns the same one when reopened", async () => {
+  it("opens with an unscored warm-up, and returns the same one when reopened", async () => {
     const { candidate, applicationId } = await readyToInterview();
 
     const first = await start(candidate, applicationId);
     expect(first.status).toBe(200);
     expect(first.body.data).toMatchObject({ done: false, totalQuestions: 5 });
-    expect(first.body.data.question.orderIndex).toBe(1);
+    expect(first.body.data.question).toMatchObject({ orderIndex: 0, isWarmUp: true, canaryToken: null });
+    // The warm-up is fixed text, so starting an interview costs no Gemini call at all
+    expect(ai.generateNextQuestion).not.toHaveBeenCalled();
 
     const again = await start(candidate, applicationId);
     expect(again.body.data.question.id).toBe(first.body.data.question.id);
-    // The second call resumed rather than generating another question
-    expect(ai.generateNextQuestion).toHaveBeenCalledTimes(1);
+    expect(ai.generateNextQuestion).not.toHaveBeenCalled();
+  });
+
+  it("doesn't score the warm-up, and builds the first real question from it", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const warmUp = (await start(candidate, applicationId)).body.data;
+
+    const res = await answer(candidate, warmUp.session.id, warmUp.question.id, LONG_ANSWER);
+
+    expect(res.body.data.score).toBeNull();
+    expect(res.body.data.feedback).toBeNull();
+    expect(ai.evaluateAnswer).not.toHaveBeenCalled();
+    expect(res.body.data.question).toMatchObject({ orderIndex: 1, isWarmUp: false, difficulty: "medium" });
+    expect(res.body.data.question.canaryToken).toEqual(expect.any(String));
   });
 
   it("keeps other candidates out", async () => {
@@ -69,7 +91,7 @@ describe("starting and resuming", () => {
 describe("answering", () => {
   it("scores each answer, adapts the difficulty and finishes with a report", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    let state = (await start(candidate, applicationId)).body.data;
+    let state = await startAtFirstScored(candidate, applicationId);
     const sessionId = state.session.id;
 
     // A long answer scores 8 in the mock, so the next question should get harder
@@ -96,20 +118,22 @@ describe("answering", () => {
     const session = await prisma.interviewSession.findUniqueOrThrow({ where: { id: sessionId } });
     expect(session.status).toBe("COMPLETED");
     expect(session.endedAt).not.toBeNull();
+    // Five scored questions plus the warm-up
+    expect(await prisma.interviewAnswer.count()).toBe(6);
   });
 
   it("stores the score and feedback with the answer", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
     await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
 
-    const saved = await prisma.interviewAnswer.findFirstOrThrow();
+    const saved = await prisma.interviewAnswer.findFirstOrThrow({ where: { questionId: state.question.id } });
     expect(saved).toMatchObject({ score: 8, feedback: "Test feedback.", aiLikelihoodScore: 25 });
   });
 
   it("refuses a second answer to the same question", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
     await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
 
     const again = await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
@@ -118,13 +142,12 @@ describe("answering", () => {
 
   it("saves the answer even when the next question can't be generated, and recovers on retry", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
     vi.mocked(ai.generateNextQuestion).mockRejectedValueOnce(new ai.AiServiceError(new Error("quota")));
 
     const pending = await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
     expect(pending.status).toBe(200);
     expect(pending.body.data).toMatchObject({ done: false, question: null, score: 8 });
-    expect(await prisma.interviewAnswer.count()).toBe(1);
 
     // What the "Try again" button does
     const recovered = await start(candidate, applicationId);
@@ -133,19 +156,19 @@ describe("answering", () => {
 
   it("fails without saving when scoring is unavailable", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
     vi.mocked(ai.evaluateAnswer).mockRejectedValueOnce(new ai.AiServiceError(new Error("quota")));
 
     const res = await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
 
     expect(res.status).toBe(503);
     expect(res.body.error).toMatch(/temporarily unavailable/i);
-    expect(await prisma.interviewAnswer.count()).toBe(0);
+    expect(await prisma.interviewAnswer.count({ where: { questionId: state.question.id } })).toBe(0);
   });
 
   it("transcribes a voice answer and keeps the recording for the recruiter", async () => {
     const { candidate, recruiter, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
 
     const res = await api
       .post(`/api/interviews/${state.session.id}/answer-audio`)
@@ -154,13 +177,14 @@ describe("answering", () => {
       .attach("audio", Buffer.from("fake webm audio"), { filename: "answer.webm", contentType: "audio/webm" });
 
     expect(res.status).toBe(200);
-    const saved = await prisma.interviewAnswer.findFirstOrThrow();
+    const saved = await prisma.interviewAnswer.findFirstOrThrow({ where: { questionId: state.question.id } });
     expect(saved.answerText).toBe("Transcribed text from the candidate's recording.");
     expect(saved.audioMimeType).toBe("audio/webm");
     expect(saved.audioUrl).not.toBeNull();
 
     const detail = await api.get(`/api/applications/${applicationId}`).set(auth(recruiter.token));
-    expect(detail.body.data.interviewSession.questions[0].answer.isVoice).toBe(true);
+    const scored = detail.body.data.interviewSession.questions.find((q: { orderIndex: number }) => q.orderIndex === 1);
+    expect(scored.answer.isVoice).toBe(true);
 
     const recording = await api
       .get(`/api/applications/${applicationId}/answers/${saved.id}/audio`)
@@ -168,18 +192,93 @@ describe("answering", () => {
     expect(recording.status).toBe(200);
     expect(recording.headers["content-type"]).toBe("audio/webm");
   });
+
+  it("skips Gemini transcription when the browser recognised the speech itself", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const state = await startAtFirstScored(candidate, applicationId);
+    const spoken = "I used Postgres row level locks so two workers couldn't grab the same job.";
+
+    const res = await api
+      .post(`/api/interviews/${state.session.id}/answer-audio`)
+      .set(auth(candidate.token))
+      .field("questionId", state.question.id)
+      .field("transcript", spoken)
+      .field("rawTranscript", spoken)
+      .field("voiceMetrics", JSON.stringify({ latencyMs: 900, speakingMs: 21000, wordCount: 14 }))
+      .attach("audio", Buffer.from("fake webm audio"), { filename: "answer.webm", contentType: "audio/webm" });
+
+    expect(res.status).toBe(200);
+    expect(ai.transcribeAudio).not.toHaveBeenCalled();
+    const saved = await prisma.interviewAnswer.findFirstOrThrow({ where: { questionId: state.question.id } });
+    expect(saved.answerText).toBe(spoken);
+    expect(saved.rawTranscript).toBe(spoken);
+    expect(saved.voiceMetrics).toMatchObject({ latencyMs: 900, wordCount: 14 });
+  });
 });
 
 describe("anti-cheat signals", () => {
+  const eventTypes = async () =>
+    (await prisma.proctoringEvent.findMany()).map((event) => event.eventType);
+
   it("flags an answer typed impossibly fast", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
 
     await answer(candidate, state.session.id, state.question.id, LONG_ANSWER, 2);
 
-    const events = await prisma.proctoringEvent.findMany();
-    expect(events.map((event) => event.eventType)).toContain("SUSPICIOUS_TYPING_SPEED");
+    const events = await prisma.proctoringEvent.findMany({ where: { eventType: "SUSPICIOUS_TYPING_SPEED" } });
+    expect(events).toHaveLength(1);
     expect(events[0]!.metadata).toMatchObject({ answerLength: LONG_ANSWER.length });
+  });
+
+  it("flags an answer that repeats the question's hidden canary text", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const state = await startAtFirstScored(candidate, applicationId);
+    const token: string = state.question.canaryToken;
+
+    await answer(candidate, state.session.id, state.question.id, `${LONG_ANSWER} Also ${token}.`);
+
+    const events = await prisma.proctoringEvent.findMany({ where: { eventType: "CANARY_TRIGGERED" } });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.metadata).toMatchObject({ token });
+  });
+
+  it("records running past the answer time limit", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const state = await startAtFirstScored(candidate, applicationId);
+
+    await answer(candidate, state.session.id, state.question.id, LONG_ANSWER, 240);
+
+    expect(await eventTypes()).toContain("ANSWER_TIME_EXCEEDED");
+  });
+
+  it("flags a transcript that was replaced rather than corrected", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const state = await startAtFirstScored(candidate, applicationId);
+
+    await api.post(`/api/interviews/${state.session.id}/answer`).set(auth(candidate.token)).send({
+      questionId: state.question.id,
+      answerText: LONG_ANSWER,
+      timeTakenSeconds: 90,
+      rawTranscript: "um honestly I am not really sure what to say about that one",
+    });
+
+    expect(await eventTypes()).toContain("TRANSCRIPT_HEAVILY_EDITED");
+  });
+
+  it("doesn't flag ordinary corrections to a transcript", async () => {
+    const { candidate, applicationId } = await readyToInterview();
+    const state = await startAtFirstScored(candidate, applicationId);
+
+    await api.post(`/api/interviews/${state.session.id}/answer`).set(auth(candidate.token)).send({
+      questionId: state.question.id,
+      answerText: LONG_ANSWER,
+      timeTakenSeconds: 90,
+      // One misheard word fixed: "post grey SQL" -> "PostgreSQL"
+      rawTranscript: LONG_ANSWER.replace("PostgreSQL", "post grey SQL"),
+    });
+
+    expect(await eventTypes()).not.toContain("TRANSCRIPT_HEAVILY_EDITED");
   });
 
   it("records the events the browser reports, but not server-side ones", async () => {
@@ -194,7 +293,7 @@ describe("anti-cheat signals", () => {
     const rejected = await api
       .post(`/api/interviews/${sessionId}/proctoring`)
       .set(auth(candidate.token))
-      .send({ eventType: "SUSPICIOUS_TYPING_SPEED" });
+      .send({ eventType: "CANARY_TRIGGERED" });
 
     expect(allowed.status).toBe(201);
     expect(rejected.status).toBe(400);
@@ -203,7 +302,7 @@ describe("anti-cheat signals", () => {
 
   it("keeps them out of the candidate's own transcript", async () => {
     const { candidate, applicationId } = await readyToInterview();
-    const state = (await start(candidate, applicationId)).body.data;
+    const state = await startAtFirstScored(candidate, applicationId);
     await answer(candidate, state.session.id, state.question.id, LONG_ANSWER);
     await api.post(`/api/interviews/${state.session.id}/proctoring`).set(auth(candidate.token)).send({ eventType: "TAB_SWITCH" });
 
@@ -211,9 +310,13 @@ describe("anti-cheat signals", () => {
     const body = JSON.stringify(res.body.data);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.questions[0].answer).toMatchObject({ score: 8, feedback: "Test feedback.", isVoice: false });
+    const [warmUp, scored] = res.body.data.questions;
+    expect(warmUp).toMatchObject({ orderIndex: 0, isWarmUp: true });
+    expect(warmUp.answer).toMatchObject({ score: null, feedback: null });
+    expect(scored.answer).toMatchObject({ score: 8, feedback: "Test feedback.", isVoice: false });
     expect(body).not.toContain("aiLikelihood");
     expect(body).not.toContain("proctoringEvents");
     expect(body).not.toContain("audioUrl");
+    expect(body).not.toContain("canaryToken");
   });
 });
