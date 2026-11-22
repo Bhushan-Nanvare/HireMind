@@ -13,6 +13,10 @@ const envSchema = z
     DATABASE_URL: z.string({ error: "DATABASE_URL is not set" }).min(1, "DATABASE_URL is not set"),
     JWT_SECRET: z.string({ error: "JWT_SECRET is not set" }).min(1, "JWT_SECRET is not set"),
     GEMINI_API_KEY: z.string().optional(),
+    /** "fake" returns canned AI responses instead of calling Gemini. Local development only. */
+    AI_DRIVER: z.enum(["gemini", "fake"]).default("gemini"),
+    /** Generation calls allowed per minute before they queue. The free tier allows 5; 0 disables. */
+    GEMINI_GENERATE_RPM: z.coerce.number().int().min(0).max(1000).optional(),
     PORT: z.coerce.number().int().positive().default(5000),
     /** Comma-separated browser origins allowed to call the API */
     CORS_ORIGINS: z.string().optional(),
@@ -37,6 +41,9 @@ const envSchema = z
     if (env.NODE_ENV === "production") {
       if (env.JWT_SECRET.length < 32) {
         ctx.addIssue({ code: "custom", path: ["JWT_SECRET"], message: "must be at least 32 characters in production" });
+      }
+      if (env.AI_DRIVER === "fake") {
+        ctx.addIssue({ code: "custom", path: ["AI_DRIVER"], message: "cannot be fake in production" });
       }
       mustBeSet("GEMINI_API_KEY", "is required in production");
       mustBeSet("CORS_ORIGINS", "is required in production: the frontend's URL");
@@ -68,8 +75,13 @@ export function loadEnv(): Env {
 /** Things that work but probably aren't what you want. */
 function gaps(env: Env): string[] {
   const warnings: string[] = [];
+  if (env.AI_DRIVER === "fake") {
+    warnings.push("AI_DRIVER is fake: AI responses are canned and no Gemini quota is used.");
+  }
   if (env.NODE_ENV !== "production") {
-    if (!env.GEMINI_API_KEY) warnings.push("GEMINI_API_KEY is not set: match scores and interviews will fail.");
+    if (!env.GEMINI_API_KEY && env.AI_DRIVER !== "fake") {
+      warnings.push("GEMINI_API_KEY is not set: match scores and interviews will fail.");
+    }
     if (env.JWT_SECRET.length < 32) warnings.push("JWT_SECRET is shorter than 32 characters. Use a long random value in production.");
     if (!env.CORS_ORIGINS) warnings.push("CORS_ORIGINS is not set: only the local Vite servers can call the API from a browser.");
   }

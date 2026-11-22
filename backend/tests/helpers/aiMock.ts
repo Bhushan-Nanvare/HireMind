@@ -53,8 +53,8 @@ export function embeddingsMock() {
     evaluateAnswer: vi.fn(async (_question: string, answer: string) => ({
       score: answer.length > 40 ? 8 : 3,
       feedback: "Test feedback.",
+      aiLikelihood: 25,
     })),
-    analyzeAnswerAuthenticity: vi.fn(async () => 25),
     generateFinalReport: vi.fn(async () => ({
       summary: "Test summary of the interview.",
       recommendation: "Recommend — test reason.",

@@ -11,7 +11,6 @@ import {
   evaluateAnswer,
   generateFinalReport,
   transcribeAudio,
-  analyzeAnswerAuthenticity,
 } from "../../shared/embeddings";
 
 const TOTAL_QUESTIONS = 5;
@@ -362,16 +361,12 @@ export async function submitAnswer(userId: string, sessionId: string, input: Ans
 
   // The warm-up exists only to capture how this candidate speaks naturally, so it is never scored
   // and costs no Gemini call. For the rest: score before saving anything, so a Gemini failure lets
-  // the candidate resubmit the same answer. AI-likeness is skipped for very short answers, where
-  // the score would be meaningless.
-  const [evaluation, aiLikelihoodScore] = question.isWarmUp
-    ? [null, null]
-    : await Promise.all([
-        evaluateAnswer(question.questionText, answerText),
-        answerText.length >= 30 ? analyzeAnswerAuthenticity(answerText) : Promise.resolve(null),
-      ]);
+  // the candidate resubmit the same answer.
+  const evaluation = question.isWarmUp ? null : await evaluateAnswer(question.questionText, answerText);
   const score = evaluation?.score ?? null;
   const feedback = evaluation?.feedback ?? null;
+  // Very short answers carry no signal, so the estimate is discarded rather than shown
+  const aiLikelihoodScore = answerText.length >= 30 ? (evaluation?.aiLikelihood ?? null) : null;
 
   try {
     await prisma.interviewAnswer.create({
