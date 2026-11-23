@@ -5,13 +5,22 @@
  * or its quota. Intended for local development and demos; env validation refuses it in production.
  */
 
-const EMBEDDING_SIZE = 256;
+const EMBEDDING_SIZE = 1536;
 
-/** Same text always gives the same vector, so match scores are stable between runs. */
+/**
+ * Words hashed into buckets, then normalised: texts that share vocabulary end up with similar
+ * vectors. A random-per-text vector would be deterministic too, but every match score would come
+ * out near zero, which makes a demo look broken.
+ */
 export function fakeEmbedding(text: string): number[] {
-  let seed = 0;
-  for (const char of text) seed = (seed * 31 + char.charCodeAt(0)) % 100003;
-  return Array.from({ length: EMBEDDING_SIZE }, (_, i) => Math.sin((i + 1) * (seed + 1) * 0.001));
+  const vector = new Array<number>(EMBEDDING_SIZE).fill(0);
+  for (const word of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    let bucket = 0;
+    for (const char of word) bucket = (bucket * 31 + char.charCodeAt(0)) % EMBEDDING_SIZE;
+    vector[bucket] = (vector[bucket] ?? 0) + 1;
+  }
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+  return vector.map((value) => value / norm);
 }
 
 export function fakeSkillGaps() {

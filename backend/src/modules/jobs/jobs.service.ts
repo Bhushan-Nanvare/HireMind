@@ -1,6 +1,6 @@
 import { prisma } from "../../shared/prisma";
-import { generateEmbedding } from "../../shared/embeddings";
-import { bestMatch, toMatchPercent } from "../../shared/matching";
+import { cosineSimilarity, generateEmbedding } from "../../shared/embeddings";
+import { toMatchPercent } from "../../shared/matching";
 import { conflict, notFound } from "../../shared/errors";
 import { logger } from "../../shared/logger";
 
@@ -125,11 +125,24 @@ export async function getJobById(jobId: string) {
 }
 
 const POOL_RESULTS = 20;
+/** Chunks pulled from the index before grouping by candidate; enough to fill POOL_RESULTS. */
+const CHUNK_CANDIDATES = 200;
+
+interface PoolRow {
+  candidateId: string;
+  fullName: string;
+  evidence: string | null;
+  score: number;
+}
 
 /**
  * Ranks every candidate who has uploaded a resume against this job, with the resume section that
  * matched. Contact details are deliberately withheld unless the candidate applied: a resume uploaded
  * to apply for one job isn't consent to be contacted about every other.
+ *
+ * The chunk search runs in Postgres against an HNSW index rather than in Node, because that table
+ * grows by roughly forty rows per resume. Whole-resume vectors stay as plain arrays: comparing one
+ * pair of them is O(1), so an index would buy nothing.
  */
 export async function searchCandidatePool(userId: string, jobId: string) {
   const recruiterId = await getRecruiterId(userId);
@@ -144,33 +157,58 @@ export async function searchCandidatePool(userId: string, jobId: string) {
     jobEmbedding = await generateEmbedding(jobEmbeddingText(job));
     await prisma.jobPosting.update({ where: { id: jobId }, data: { embedding: jobEmbedding } });
   }
+  const queryVector = JSON.stringify(jobEmbedding);
 
-  const resumes = await prisma.resume.findMany({
-    orderBy: { createdAt: "desc" },
-    select: {
-      embedding: true,
-      chunks: { select: { text: true, embedding: true } },
-      candidate: { select: { id: true, fullName: true } },
-      applications: { where: { jobId }, select: { id: true } },
-    },
+  // Nearest chunks first so the index is used, then the best one per candidate
+  const rows = await prisma.$queryRaw<PoolRow[]>`
+    SELECT c."id" AS "candidateId",
+           c."fullName",
+           ch."text" AS evidence,
+           1 - (ch."embedding" <=> ${queryVector}::vector) AS score
+    FROM "ResumeChunk" ch
+    JOIN "Resume" r ON r."id" = ch."resumeId"
+    JOIN "Candidate" c ON c."id" = r."candidateId"
+    WHERE ch."embedding" IS NOT NULL
+    ORDER BY ch."embedding" <=> ${queryVector}::vector
+    LIMIT ${CHUNK_CANDIDATES}
+  `;
+
+  const best = new Map<string, PoolRow>();
+  for (const row of rows) {
+    const existing = best.get(row.candidateId);
+    if (!existing || row.score > existing.score) best.set(row.candidateId, row);
+  }
+
+  // Resumes uploaded before chunking existed still rank, just without an evidence quote
+  const unchunked = await prisma.resume.findMany({
+    where: { chunks: { none: {} } },
+    select: { embedding: true, candidate: { select: { id: true, fullName: true } } },
   });
-
-  const bestPerCandidate = new Map<string, { candidateId: string; fullName: string; matchScore: number; evidence: string | null; applicationId: string | null }>();
-  for (const resume of resumes) {
-    const match = bestMatch(jobEmbedding, resume);
-    if (!match) continue;
-
-    const existing = bestPerCandidate.get(resume.candidate.id);
-    if (existing && existing.matchScore >= toMatchPercent(match.score)) continue;
-
-    bestPerCandidate.set(resume.candidate.id, {
+  for (const resume of unchunked) {
+    if (resume.embedding.length !== jobEmbedding.length) continue;
+    const score = cosineSimilarity(jobEmbedding, resume.embedding);
+    const existing = best.get(resume.candidate.id);
+    if (existing && existing.score >= score) continue;
+    best.set(resume.candidate.id, {
       candidateId: resume.candidate.id,
       fullName: resume.candidate.fullName,
-      matchScore: toMatchPercent(match.score),
-      evidence: match.evidence,
-      applicationId: resume.applications[0]?.id ?? null,
+      evidence: null,
+      score,
     });
   }
 
-  return [...bestPerCandidate.values()].sort((a, b) => b.matchScore - a.matchScore).slice(0, POOL_RESULTS);
+  const ranked = [...best.values()].sort((a, b) => b.score - a.score).slice(0, POOL_RESULTS);
+  const applications = await prisma.application.findMany({
+    where: { jobId, candidateId: { in: ranked.map((row) => row.candidateId) } },
+    select: { id: true, candidateId: true },
+  });
+  const applied = new Map(applications.map((application) => [application.candidateId, application.id]));
+
+  return ranked.map((row) => ({
+    candidateId: row.candidateId,
+    fullName: row.fullName,
+    matchScore: toMatchPercent(row.score),
+    evidence: row.evidence,
+    applicationId: applied.get(row.candidateId) ?? null,
+  }));
 }

@@ -5,7 +5,7 @@ vi.mock("../src/shared/email", async () => (await import("./helpers/emailMock"))
 
 import { api, auth } from "./helpers/app";
 import { prisma, resetDatabase } from "./helpers/db";
-import { createJob, createUser, seedApplication, seedResume } from "./helpers/factories";
+import { createJob, createUser, seedApplication, seedChunks, seedResume } from "./helpers/factories";
 
 beforeEach(resetDatabase);
 
@@ -160,17 +160,17 @@ describe("searching the candidate pool", () => {
     const target = await jobEmbedding(job.id);
 
     const strong = await createUser("CANDIDATE", "Strong Match");
-    await seedResume(strong, {
-      chunks: [
-        { text: "Volunteering at a dog shelter on weekends.", embedding: target.map((value) => -value) },
-        { text: "Five years building Node.js services on PostgreSQL.", embedding: target },
-      ],
-    });
+    const strongResume = await seedResume(strong);
+    await seedChunks(strongResume.id, [
+      { text: "Volunteering at a dog shelter on weekends.", embedding: target.map((value) => -value) },
+      { text: "Five years building Node.js services on PostgreSQL.", embedding: target },
+    ]);
 
     const weak = await createUser("CANDIDATE", "Weak Match");
-    await seedResume(weak, {
-      chunks: [{ text: "Mostly front-end design work in Figma.", embedding: target.map((value) => -value) }],
-    });
+    const weakResume = await seedResume(weak);
+    await seedChunks(weakResume.id, [
+      { text: "Mostly front-end design work in Figma.", embedding: target.map((value) => -value) },
+    ]);
 
     const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
 
@@ -190,7 +190,8 @@ describe("searching the candidate pool", () => {
     const recruiter = await createUser("RECRUITER", "Acme Corp");
     const job = await createJob(recruiter);
     const candidate = await createUser("CANDIDATE", "Casey");
-    await seedResume(candidate, { chunks: [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }] });
+    const resume = await seedResume(candidate);
+    await seedChunks(resume.id, [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }]);
 
     const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));
 
@@ -201,9 +202,8 @@ describe("searching the candidate pool", () => {
     const recruiter = await createUser("RECRUITER", "Acme Corp");
     const job = await createJob(recruiter);
     const candidate = await createUser("CANDIDATE", "Casey");
-    const resume = await seedResume(candidate, {
-      chunks: [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }],
-    });
+    const resume = await seedResume(candidate);
+    await seedChunks(resume.id, [{ text: "Node.js work.", embedding: await jobEmbedding(job.id) }]);
     const application = await seedApplication(candidate, job.id, resume.id);
 
     const res = await api.get(`/api/jobs/${job.id}/candidates`).set(auth(recruiter.token));

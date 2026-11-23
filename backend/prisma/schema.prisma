@@ -137,9 +137,15 @@ model ResumeChunk {
   resume     Resume  @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   text       String
   orderIndex Int
-  embedding  Float[]
+  /// pgvector column with an HNSW index, searched with raw SQL: this table grows ~40 rows per
+  /// resume, so it is the one place where scanning every row in Node would stop working.
+  /// Prisma has no vector type, hence Unsupported and the raw queries in jobs.service.
+  embedding  Unsupported("vector(1536)")?
 
   @@index([resumeId])
+  /// Declared so Prisma knows an index exists here. The real one is HNSW with vector_cosine_ops,
+  /// created in the migration: Prisma has no way to express that index type.
+  @@index([embedding])
 }
 
 model Application {

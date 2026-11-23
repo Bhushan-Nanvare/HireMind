@@ -14,7 +14,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector's image, not the stock one: the vector extension isn't in postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: hiremind
           POSTGRES_PASSWORD: hiremind_ci

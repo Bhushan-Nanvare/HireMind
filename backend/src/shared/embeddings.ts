@@ -13,6 +13,9 @@ import {
 } from "./aiFake";
 
 const EMBEDDING_MODEL = "gemini-embedding-001";
+// 1536 rather than the model's default 3072: pgvector's HNSW index only supports up to 2000
+// dimensions. The model is trained so a truncated vector stays usable (see evals/run.ts).
+export const EMBEDDING_DIMENSIONS = 1536;
 const GENERATION_MODEL = "gemini-3.6-flash";
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -165,7 +168,11 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   if (usingFake()) return fakeEmbedding(input);
 
   return withRetries("embedding", async () => {
-    const result = await getClient().models.embedContent({ model: EMBEDDING_MODEL, contents: input });
+    const result = await getClient().models.embedContent({
+      model: EMBEDDING_MODEL,
+      contents: input,
+      config: { outputDimensionality: EMBEDDING_DIMENSIONS },
+    });
     const values = result.embeddings?.[0]?.values;
     if (!values?.length) throw new InvalidResponseError("Empty embedding");
     return values;
@@ -179,7 +186,11 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   if (usingFake()) return inputs.map(fakeEmbedding);
 
   return withRetries("embedding", async () => {
-    const result = await getClient().models.embedContent({ model: EMBEDDING_MODEL, contents: inputs });
+    const result = await getClient().models.embedContent({
+      model: EMBEDDING_MODEL,
+      contents: inputs,
+      config: { outputDimensionality: EMBEDDING_DIMENSIONS },
+    });
     const embeddings = result.embeddings ?? [];
     if (embeddings.length !== inputs.length) throw new InvalidResponseError("Wrong number of embeddings");
 

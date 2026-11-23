@@ -3,7 +3,7 @@ import { vi } from "vitest";
 // A stand-in for shared/embeddings: deterministic, offline, and free. Use it with
 //   vi.mock("../src/shared/embeddings", async () => (await import("./helpers/aiMock")).embeddingsMock());
 
-const EMBEDDING_SIZE = 16;
+const EMBEDDING_SIZE = 1536;
 
 /** Same shape of maths as the real thing, so match scores stay believable. */
 function fakeEmbedding(text: string): number[] {

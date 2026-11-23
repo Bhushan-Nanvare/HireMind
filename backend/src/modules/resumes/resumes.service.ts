@@ -83,22 +83,21 @@ export async function uploadResume(userId: string, file: { path: string; origina
   const storedFile = await storeUpload(file.path, { folder: "resumes", contentType: "application/pdf", fileName });
 
   try {
-    const resume = await prisma.resume.create({
-      data: {
-        candidateId,
-        fileUrl: storedFile,
-        fileName,
-        parsedText,
-        embedding,
-        chunks: {
-          create: chunkEmbeddings.map((chunkEmbedding, index) => ({
-            text: chunkTexts[index] ?? "",
-            orderIndex: index,
-            embedding: chunkEmbedding,
-          })),
-        },
-      },
-      select: summarySelect,
+    // One transaction, but chunks go in by hand: their embedding is a pgvector column, which
+    // Prisma can't write through the typed API.
+    const resume = await prisma.$transaction(async (tx) => {
+      const created = await tx.resume.create({
+        data: { candidateId, fileUrl: storedFile, fileName, parsedText, embedding },
+        select: summarySelect,
+      });
+      for (const [index, chunkEmbedding] of chunkEmbeddings.entries()) {
+        await tx.$executeRaw`
+          INSERT INTO "ResumeChunk" ("id", "resumeId", "text", "orderIndex", "embedding")
+          VALUES (gen_random_uuid(), ${created.id}, ${chunkTexts[index] ?? ""}, ${index},
+                  ${JSON.stringify(chunkEmbedding)}::vector)
+        `;
+      }
+      return created;
     });
     return toSummary(resume);
   } catch (err) {

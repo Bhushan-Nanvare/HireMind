@@ -4,7 +4,7 @@ import { prisma } from "./db";
 
 export const PASSWORD = "test-password-123";
 
-const EMBEDDING_SIZE = 16;
+const EMBEDDING_SIZE = 1536;
 const fakeStoredEmbedding = () => Array.from({ length: EMBEDDING_SIZE }, (_, i) => Math.sin(i + 1));
 
 export interface TestUser {
@@ -55,10 +55,7 @@ export async function createJob(
 }
 
 /** A resume as if it had been uploaded and embedded earlier. */
-export async function seedResume(
-  candidate: TestUser,
-  overrides: { fileName?: string; fileUrl?: string; chunks?: { text: string; embedding: number[] }[] } = {}
-) {
+export async function seedResume(candidate: TestUser, overrides: { fileName?: string; fileUrl?: string } = {}) {
   return prisma.resume.create({
     data: {
       candidateId: candidate.profileId,
@@ -66,17 +63,18 @@ export async function seedResume(
       fileName: overrides.fileName ?? "Test CV.pdf",
       parsedText: "Backend developer with Node.js, TypeScript, PostgreSQL and Redis experience.",
       embedding: fakeStoredEmbedding(),
-      ...(overrides.chunks && {
-        chunks: {
-          create: overrides.chunks.map((chunk, index) => ({
-            text: chunk.text,
-            orderIndex: index,
-            embedding: chunk.embedding,
-          })),
-        },
-      }),
     },
   });
+}
+
+/** Chunk embeddings are a pgvector column, so they go in with raw SQL rather than through Prisma. */
+export async function seedChunks(resumeId: string, chunks: { text: string; embedding: number[] }[]) {
+  for (const [index, chunk] of chunks.entries()) {
+    await prisma.$executeRaw`
+      INSERT INTO "ResumeChunk" ("id", "resumeId", "text", "orderIndex", "embedding")
+      VALUES (gen_random_uuid(), ${resumeId}, ${chunk.text}, ${index}, ${JSON.stringify(chunk.embedding)}::vector)
+    `;
+  }
 }
 
 /** An application as if the candidate had already applied. */
