@@ -5,6 +5,7 @@ import applicationRoutes from "./modules/applications/applications.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import interviewRoutes from "./modules/interviews/interviews.routes";
 import jobRoutes from "./modules/jobs/jobs.routes";
+import mcqRoutes from "./modules/mcq/mcq.routes";
 import resumeRoutes from "./modules/resumes/resumes.routes";
 import { errorHandler, notFoundHandler } from "./shared/errorHandler";
 import { logger, requestLogger } from "./shared/logger";
@@ -12,10 +13,22 @@ import { apiLimiter } from "./shared/rateLimits";
 
 const DEV_ORIGINS = ["http://localhost:5173", "http://localhost:4173"];
 
-/** Browser origins allowed to call the API: CORS_ORIGINS (comma-separated), or the Vite dev servers. */
-function allowedOrigins(): string[] {
-  const configured = process.env.CORS_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean);
-  if (configured?.length) return configured;
+/** A configured origin as browsers send it: no path and no trailing slash, so "https://app.com/" still matches. */
+function toOrigin(value: string): string | null {
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Browser origins allowed to call the API: CORS_ORIGINS (comma-separated) plus APP_URL, or the Vite dev servers. */
+export function allowedOrigins(): string[] {
+  const configured = (process.env.CORS_ORIGINS ?? "").split(",").map(toOrigin);
+  const appUrl = process.env.APP_URL ? toOrigin(process.env.APP_URL) : null;
+  const origins = [...new Set([...configured, appUrl].filter((origin): origin is string => origin !== null))];
+
+  if (origins.length > 0 && (process.env.CORS_ORIGINS || process.env.NODE_ENV === "production")) return origins;
   logger.warn("CORS_ORIGINS is not set", { allowed: DEV_ORIGINS });
   return DEV_ORIGINS;
 }
@@ -29,8 +42,11 @@ export function createApp() {
   const trustProxy = process.env.TRUST_PROXY;
   if (trustProxy) app.set("trust proxy", /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
 
+  const origins = allowedOrigins();
+  logger.info("CORS allowed origins", { origins });
+
   app.use(helmet());
-  app.use(cors({ origin: allowedOrigins() }));
+  app.use(cors({ origin: origins }));
   app.use(express.json({ limit: "100kb" }));
 
   // Before the rate limiter and the request log, so frequent health checks are neither throttled nor noisy
@@ -43,6 +59,7 @@ export function createApp() {
   app.use("/api/resumes", resumeRoutes);
   app.use("/api/applications", applicationRoutes);
   app.use("/api/interviews", interviewRoutes);
+  app.use("/api/mcq", mcqRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

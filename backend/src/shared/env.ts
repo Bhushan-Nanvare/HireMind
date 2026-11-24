@@ -46,8 +46,13 @@ const envSchema = z
         ctx.addIssue({ code: "custom", path: ["AI_DRIVER"], message: "cannot be fake in production" });
       }
       mustBeSet("GEMINI_API_KEY", "is required in production");
-      mustBeSet("CORS_ORIGINS", "is required in production: the frontend's URL");
       mustBeSet("APP_URL", "is required in production: email links point at it");
+    }
+
+    for (const origin of (env.CORS_ORIGINS ?? "").split(",").map((value) => value.trim()).filter(Boolean)) {
+      if (!URL.canParse(origin)) {
+        ctx.addIssue({ code: "custom", path: ["CORS_ORIGINS"], message: `"${origin}" is not a valid origin, e.g. https://hiremind.vercel.app` });
+      }
     }
 
     if (env.STORAGE_DRIVER === "s3") {
