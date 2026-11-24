@@ -101,7 +101,14 @@ export default function ApplicantsPage() {
         back={back}
         title={list.data.job.title}
         description={`${plural(all.length, "applicant")}`}
-        actions={<JobStatusBadge status={list.data.job.status} />}
+        actions={
+          <>
+            <Link to={`/recruiter/jobs/${jobId}/assessment`} className={buttonSecondary}>
+              Assessment
+            </Link>
+            <JobStatusBadge status={list.data.job.status} />
+          </>
+        }
       />
 
       {all.length === 0 ? (
@@ -168,6 +175,13 @@ export default function ApplicantsPage() {
                       ) : (
                         <InterviewStatusBadge status={session?.status ?? null} />
                       )}
+                      {applicant.assessment?.status === "SUBMITTED" && (
+                        <Badge tone={applicant.assessment.passed ? "green" : "red"}>
+                          Assessment {applicant.assessment.percent}%
+                        </Badge>
+                      )}
+                      {applicant.assessment?.status === "IN_PROGRESS" && <Badge tone="amber">Assessment in progress</Badge>}
+                      {applicant.assessment?.status === "NOT_STARTED" && <Badge>Assessment not started</Badge>}
                       {signals > 0 && <Badge tone="amber">{plural(signals, "signal")} to review</Badge>}
                     </div>
 

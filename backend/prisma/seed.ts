@@ -1,25 +1,22 @@
 /**
  * Demo data for local development: a recruiter with three jobs, a candidate with a resume, one finished
- * interview and one application waiting to start. Embeddings and AI text are faked, so this uses no Gemini
- * quota. Running it again replaces the demo accounts.
+ * interview and one application waiting to start, plus a published assessment on two jobs with one finished
+ * attempt. Embeddings and AI text are faked, so this uses no Gemini quota. Running it again replaces the demo
+ * accounts.
  *
  *   npm run seed
  */
 import bcrypt from "bcrypt";
 import { PrismaClient } from "../generated/prisma";
+import { splitIntoChunks } from "../src/shared/chunk";
+import { fakeEmbedding } from "../src/shared/aiFake";
+import { DEMO_QUESTIONS } from "./demoQuestions";
 
 const prisma = new PrismaClient();
 
 const PASSWORD = "demo-password-123";
 const RECRUITER_EMAIL = "demo-recruiter@hiremind.test";
 const CANDIDATE_EMAIL = "demo-candidate@hiremind.test";
-const EMBEDDING_SIZE = 3072;
-
-/** Stand-in for a Gemini embedding: stable, and similar vectors give a believable match score. */
-function fakeEmbedding(offset: number): number[] {
-  return Array.from({ length: EMBEDDING_SIZE }, (_, i) => Math.sin((i + offset) * 0.01));
-}
-
 const RESUME_TEXT = `Alex Rivera - Backend Developer
 Summary: 4 years building REST APIs with Node.js, Express and TypeScript.
 Experience: Payment and order services backed by PostgreSQL and Redis. Wrote integration tests with Jest.
@@ -95,34 +92,31 @@ async function main() {
     },
   });
 
+  const jobEmbedding = (job: { title: string; description: string }) => fakeEmbedding([job.title, job.description].join(" "));
+
+  const BACKEND_JOB = {
+    title: "Senior Backend Engineer (Node.js)",
+    description:
+      "Build and run our order and payment services. You'll work with Node.js, TypeScript and PostgreSQL, deploy with Docker and Kubernetes, and own reliability for the services you ship. We're looking for 4+ years of backend experience, comfort with SQL performance work, and clear written communication.",
+  };
+  const PLATFORM_JOB = {
+    title: "Platform Engineer",
+    description:
+      "Own the cloud platform our product teams deploy to: Terraform, AWS, Kubernetes, and observability with Grafana and Prometheus. Go or Node.js experience both welcome.",
+  };
+  const FRONTEND_JOB = {
+    title: "Frontend Engineer (React)",
+    description: "Closed for now: we filled this role. Kept here to show how closed postings look.",
+  };
+
   const backendJob = await prisma.jobPosting.create({
-    data: {
-      recruiterId: recruiter.id,
-      title: "Senior Backend Engineer (Node.js)",
-      description:
-        "Build and run our order and payment services. You'll work with Node.js, TypeScript and PostgreSQL, deploy with Docker and Kubernetes, and own reliability for the services you ship. We're looking for 4+ years of backend experience, comfort with SQL performance work, and clear written communication.",
-      embedding: fakeEmbedding(0),
-    },
+    data: { recruiterId: recruiter.id, ...BACKEND_JOB, embedding: jobEmbedding(BACKEND_JOB) },
   });
-
   const platformJob = await prisma.jobPosting.create({
-    data: {
-      recruiterId: recruiter.id,
-      title: "Platform Engineer",
-      description:
-        "Own the cloud platform our product teams deploy to: Terraform, AWS, Kubernetes, and observability with Grafana and Prometheus. Go or Node.js experience both welcome.",
-      embedding: fakeEmbedding(400),
-    },
+    data: { recruiterId: recruiter.id, ...PLATFORM_JOB, embedding: jobEmbedding(PLATFORM_JOB) },
   });
-
   await prisma.jobPosting.create({
-    data: {
-      recruiterId: recruiter.id,
-      title: "Frontend Engineer (React)",
-      description: "Closed for now: we filled this role. Kept here to show how closed postings look.",
-      status: "CLOSED",
-      embedding: fakeEmbedding(800),
-    },
+    data: { recruiterId: recruiter.id, ...FRONTEND_JOB, status: "CLOSED", embedding: jobEmbedding(FRONTEND_JOB) },
   });
 
   const resume = await prisma.resume.create({
@@ -132,9 +126,15 @@ async function main() {
       fileUrl: "uploads/resumes/demo-seed-resume",
       fileName: "Alex Rivera CV.pdf",
       parsedText: RESUME_TEXT,
-      embedding: fakeEmbedding(20),
+      embedding: fakeEmbedding(RESUME_TEXT),
     },
   });
+  for (const [index, text] of splitIntoChunks(RESUME_TEXT).entries()) {
+    await prisma.$executeRaw`
+      INSERT INTO "ResumeChunk" ("id", "resumeId", "text", "orderIndex", "embedding")
+      VALUES (gen_random_uuid(), ${resume.id}, ${text}, ${index}, ${JSON.stringify(fakeEmbedding(text))}::vector)
+    `;
+  }
 
   // Application 1: interview finished, with a report and a couple of integrity signals
   const finished = await prisma.application.create({
@@ -209,13 +209,64 @@ async function main() {
     },
   });
 
+  const publishAssessment = (jobId: string) =>
+    prisma.mcqTest.create({
+      data: {
+        jobId,
+        title: "Backend fundamentals",
+        durationMinutes: 20,
+        questionCount: 10,
+        passPercent: 60,
+        published: true,
+        questions: { create: DEMO_QUESTIONS.map((question, position) => ({ ...question, position })) },
+      },
+      include: { questions: { orderBy: { position: "asc" } } },
+    });
+
+  // Backend job: finished attempt, so the recruiter has a result to review
+  const backendTest = await publishAssessment(backendJob.id);
+  const submittedAt = new Date(Date.now() - 40 * 60 * 1000);
+  const attemptStart = new Date(submittedAt.getTime() - 14 * 60 * 1000);
+  const missed = new Set([2, 5, 8]);
+  await prisma.mcqAttempt.create({
+    data: {
+      testId: backendTest.id,
+      applicationId: finished.id,
+      startedAt: attemptStart,
+      expiresAt: new Date(attemptStart.getTime() + 20 * 60 * 1000),
+      submittedAt,
+      score: 10 - missed.size,
+      total: 10,
+      questions: {
+        create: backendTest.questions.filter((_, position) => position % 3 === 0).map((question, index) => ({
+          questionId: question.id,
+          orderIndex: index,
+          optionOrder: question.options.map((_, option) => option),
+          selected: missed.has(index)
+            ? [question.options.findIndex((_, option) => !question.correct.includes(option))]
+            : question.correct,
+          answeredAt: new Date(attemptStart.getTime() + (index + 1) * 80_000),
+        })),
+      },
+      events: {
+        create: [
+          { eventType: "TAB_SWITCH", createdAt: new Date(attemptStart.getTime() + 5 * 60 * 1000) },
+          { eventType: "TAB_SWITCH", createdAt: new Date(attemptStart.getTime() + 9 * 60 * 1000) },
+        ],
+      },
+    },
+  });
+
+  // Platform job: nothing taken yet, so the candidate can sit it live
+  await publishAssessment(platformJob.id);
+
   console.log(`Seeded demo data.
 
   Recruiter: ${RECRUITER_EMAIL}
   Candidate: ${CANDIDATE_EMAIL}
   Password for both: ${PASSWORD}
 
-Both accounts are already email-verified. The candidate has one finished interview and one to start.`);
+Both accounts are already email-verified. The candidate has one finished interview and assessment, and one application with both still to take.`);
 }
 
 main()

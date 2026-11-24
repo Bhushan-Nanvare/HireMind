@@ -27,9 +27,22 @@ export interface MyApplication {
   status: ApplicationStatus;
   matchScore: number | null;
   createdAt: string;
-  jobPosting: { id: string; title: string; status: JobStatus; recruiter: { companyName: string } };
+  jobPosting: {
+    id: string;
+    title: string;
+    status: JobStatus;
+    recruiter: { companyName: string };
+    mcqTest: { published: boolean } | null;
+  };
   skillGaps: SkillGap[];
   interviewSession: { id: string; status: string; report: Report | null } | null;
+  mcqAttempt: { submittedAt: string | null } | null;
+}
+
+export interface AssessmentSummary {
+  status: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED";
+  percent: number | null;
+  passed: boolean | null;
 }
 
 /** A row in the recruiter's applicant list */
@@ -46,6 +59,8 @@ export interface Applicant {
     proctoringEvents: { eventType: string }[];
     questions: { answer: { aiLikelihoodScore: number | null } | null }[];
   } | null;
+  /** Null when the job has no assessment */
+  assessment: AssessmentSummary | null;
 }
 
 export interface ApplicantList {

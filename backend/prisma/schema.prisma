@@ -106,6 +106,7 @@ model JobPosting {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @default(now()) @updatedAt
   applications Application[]
+  mcqTest      McqTest?
 
   @@index([recruiterId])
   // The public job list: open jobs, newest first
@@ -132,9 +133,9 @@ model Resume {
 
 /// A section of a resume, embedded on its own so a search can point at what actually matched.
 model ResumeChunk {
-  id         String  @id @default(uuid())
+  id         String                       @id @default(uuid())
   resumeId   String
-  resume     Resume  @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  resume     Resume                       @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   text       String
   orderIndex Int
   /// pgvector column with an HNSW index, searched with raw SQL: this table grows ~40 rows per
@@ -161,6 +162,7 @@ model Application {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @default(now()) @updatedAt
   interviewSession InterviewSession?
+  mcqAttempt       McqAttempt?
   skillGaps        SkillGap[]
 
   @@unique([candidateId, jobId])
@@ -244,4 +246,91 @@ model ProctoringEvent {
   createdAt DateTime            @default(now())
 
   @@index([sessionId])
+}
+
+enum McqEventType {
+  TAB_SWITCH
+  COPY_PASTE
+  ANSWERED_TOO_FAST
+}
+
+model McqTest {
+  id              String        @id @default(uuid())
+  jobId           String        @unique
+  job             JobPosting    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  title           String
+  durationMinutes Int
+  /// How many questions each candidate draws from the pool
+  questionCount   Int
+  passPercent     Int
+  showResult      Boolean       @default(true)
+  published       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @default(now()) @updatedAt
+  questions       McqQuestion[]
+  attempts        McqAttempt[]
+}
+
+model McqQuestion {
+  id        String               @id @default(uuid())
+  testId    String
+  test      McqTest              @relation(fields: [testId], references: [id], onDelete: Cascade)
+  text      String
+  options   String[]
+  /// Indexes into options. More than one means "select all that apply".
+  correct   Int[]
+  topic     String?
+  /// Display order in the recruiter's list; bulk inserts share one createdAt so it can't order them
+  position  Int
+  createdAt DateTime             @default(now())
+  paper     McqAttemptQuestion[]
+
+  @@index([testId, position])
+}
+
+model McqAttempt {
+  id            String               @id @default(uuid())
+  testId        String
+  test          McqTest              @relation(fields: [testId], references: [id], onDelete: Cascade)
+  applicationId String               @unique
+  application   Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  startedAt     DateTime             @default(now())
+  /// Enforced on the server; the browser's countdown is only a display
+  expiresAt     DateTime
+  submittedAt   DateTime?
+  score         Int?
+  total         Int?
+  questions     McqAttemptQuestion[]
+  events        McqEvent[]
+
+  @@index([testId])
+}
+
+/// One question on one candidate's paper, in the order and with the option order they were shown.
+model McqAttemptQuestion {
+  id          String      @id @default(uuid())
+  attemptId   String
+  attempt     McqAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    McqQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  orderIndex  Int
+  /// optionOrder[i] is the original option index shown in position i
+  optionOrder Int[]
+  /// Original option indexes the candidate picked
+  selected    Int[]
+  answeredAt  DateTime?
+
+  @@unique([attemptId, orderIndex])
+  @@unique([attemptId, questionId])
+}
+
+model McqEvent {
+  id        String       @id @default(uuid())
+  attemptId String
+  attempt   McqAttempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  eventType McqEventType
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  @@index([attemptId])
 }

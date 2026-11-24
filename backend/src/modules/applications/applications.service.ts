@@ -4,6 +4,8 @@ import { sendEmailInBackground } from "../../shared/email";
 import { applicationStatusEmail } from "../../shared/emailTemplates";
 import { badRequest, conflict, notFound } from "../../shared/errors";
 import { jobEmbeddingText } from "../jobs/jobs.service";
+import { finalizeExpiredForJob } from "../mcq/attempt.service";
+import { summarizeAssessment } from "../mcq/summary";
 
 type ApplicationStatus = "APPLIED" | "SHORTLISTED" | "REJECTED";
 
@@ -101,11 +103,20 @@ export async function listMyApplications(userId: string) {
       status: true,
       matchScore: true,
       createdAt: true,
-      jobPosting: { select: { id: true, title: true, status: true, recruiter: { select: { companyName: true } } } },
+      jobPosting: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          recruiter: { select: { companyName: true } },
+          mcqTest: { select: { published: true } },
+        },
+      },
       skillGaps: { select: { missingSkill: true, importance: true } },
       interviewSession: {
         select: { id: true, status: true, report: { select: { summary: true, recommendation: true } } },
       },
+      mcqAttempt: { select: { submittedAt: true } },
     },
   });
 }
@@ -114,12 +125,13 @@ export async function listApplicantsForJob(userId: string, jobId: string) {
   const recruiterId = await getRecruiterId(userId);
   const job = await prisma.jobPosting.findUnique({
     where: { id: jobId },
-    select: { id: true, title: true, status: true, recruiterId: true },
+    select: { id: true, title: true, status: true, recruiterId: true, mcqTest: { select: { passPercent: true } } },
   });
   if (!job || job.recruiterId !== recruiterId) {
     throw notFound("Job not found or doesn't belong to you");
   }
 
+  await finalizeExpiredForJob(jobId);
   const applications = await prisma.application.findMany({
     where: { jobId },
     orderBy: { createdAt: "desc" },
@@ -138,15 +150,17 @@ export async function listApplicantsForJob(userId: string, jobId: string) {
           questions: { select: { answer: { select: { aiLikelihoodScore: true } } } },
         },
       },
+      mcqAttempt: { select: { score: true, total: true, submittedAt: true } },
     },
   });
 
   return {
     job: { id: job.id, title: job.title, status: job.status },
     // Only what the page shows: name and contact email, never resume text, embeddings or internal IDs
-    applicants: applications.map(({ candidate, ...application }) => ({
+    applicants: applications.map(({ candidate, mcqAttempt, ...application }) => ({
       ...application,
       candidate: { fullName: candidate.fullName, email: candidate.user.email },
+      assessment: summarizeAssessment(job.mcqTest, mcqAttempt),
     })),
   };
 }

@@ -7,6 +7,7 @@ import {
   updateApplicationStatus,
   type ApplicationStatus,
 } from "../../api/applicationsApi";
+import AssessmentResult from "../../components/recruiter/AssessmentResult";
 import StatusActions from "../../components/recruiter/StatusActions";
 import TranscriptDiff from "../../components/recruiter/TranscriptDiff";
 import { buttonSecondary } from "../../components/common/styles";
@@ -162,6 +163,8 @@ export default function ApplicantDetailPage() {
           </button>
         </Card>
       </div>
+
+      <AssessmentResult applicationId={application.id} />
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-2">

@@ -27,16 +27,21 @@ Recruiters get a ranked shortlist with transcripts, scores, and integrity signal
 - 🎯 **Match score** — see how well your resume fits each job, plus the specific skills it's missing
 - 🎤 **Adaptive AI interview** — 5 questions that get harder or easier based on each answer (type or speak)
 - 💡 **Instant feedback** after every answer and a summary report at the end
+- 🗣️ **Conversational mode** — the interview reads each question aloud and transcribes your spoken answer live (Chrome/Edge)
+- 📝 **Multiple-choice assessments** — timed, randomised per candidate, graded instantly with no AI
 
 ### For Recruiters
 - 📝 **Post, edit, and close jobs** with AI-powered description embeddings
 - 📊 **Ranked applicant list** sorted by resume-to-job match score
 - 📋 **Full applicant view** — contact email, resume, interview transcript with per-answer scores, voice playback, and anti-cheat signals
 - ✅ **Shortlist or reject** with one click — the candidate gets an email automatically
+- 🔎 **Candidate pool search** — rank every uploaded resume against a job, with the matching resume section quoted as evidence
+- 🧮 **Assessment builder** — import a question bank from CSV, set the time limit and pass mark, and review per-topic results and per-question statistics
 
 ### Platform-Wide
 - 🔐 **Email verification** and **password reset** flows via one-time hashed tokens
-- 🛡️ **Anti-cheat proctoring** — tab switches, copy/paste attempts, typing speed analysis, and AI-likeness scoring
+- 🛡️ **Anti-cheat signals** — tab switches, copy/paste, typing speed, AI-likeness, hidden-text traps and transcript edits for the interview; shuffled papers, server-enforced timers and answer-speed checks for assessments. Always shown as signals to review, never verdicts
+- 🧪 **Runs without AI quota** — `AI_DRIVER=fake` returns canned responses for local development and demos
 - 🌐 **Dual storage** — local disk or any S3-compatible bucket (AWS S3, Cloudflare R2, Supabase, MinIO)
 - ⚡ **Rate limiting** on login, signup, email endpoints, and AI-heavy operations
 
@@ -167,8 +172,10 @@ Both accounts are pre-verified, with sample jobs and a completed interview ready
 | `DATABASE_URL` | ✅ Always | PostgreSQL connection string |
 | `JWT_SECRET` | ✅ Always | 32+ random chars. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `GEMINI_API_KEY` | ✅ Production | Without it, matching & interviews fail |
+| `AI_DRIVER` | No | `fake` returns canned AI responses and never calls Gemini (refused in production) |
+| `GEMINI_GENERATE_RPM` | No | Generation calls per minute before they queue. Free tier allows 5 (the default); `0` disables |
 | `PORT` | No | Defaults to `5000` |
-| `CORS_ORIGINS` | ✅ Production | Comma-separated browser origins (e.g. your Vercel URL) |
+| `CORS_ORIGINS` | ✅ Production | Comma-separated browser origins (e.g. your Vercel URL). A trailing slash is tolerated, and `APP_URL`'s origin is always allowed |
 | `APP_URL` | ✅ Production | Frontend's URL — used in email links |
 | `TRUST_PROXY` | Behind proxy | Number of proxy hops (so rate limits see real IPs) |
 | `RESEND_API_KEY` | For real emails | Without it, emails print to console in dev |
@@ -225,7 +232,7 @@ docker run --rm -d --name hiremind-test-db \
   -e POSTGRES_USER=hiremind \
   -e POSTGRES_PASSWORD=hiremind_test \
   -e POSTGRES_DB=hiremind_test \
-  -p 55432:5432 postgres:16
+  -p 55432:5432 pgvector/pgvector:pg16
 
 # 2. Run the tests
 cd backend
@@ -326,6 +333,26 @@ All endpoints are under `/api`. Responses follow the envelope: `{ success: true,
 </details>
 
 <details>
+<summary><strong>Candidate pool &amp; assessments</strong></summary>
+
+| Method | Endpoint | Access | Description |
+|---|---|---|---|
+| `GET` | `/jobs/:id/candidates` | Recruiter (owner) | Rank every uploaded resume against the job, with evidence |
+| `GET` / `PUT` | `/mcq/jobs/:jobId/test` | Recruiter (owner) | Read / save assessment settings and the question pool |
+| `POST` | `/mcq/jobs/:jobId/questions` | Recruiter (owner) | Add questions |
+| `POST` | `/mcq/jobs/:jobId/questions/import` | Recruiter (owner) | Import questions from CSV (all rows or none) |
+| `PUT` / `DELETE` | `/mcq/questions/:id` | Recruiter (owner) | Edit / delete a question (locked once a candidate has started) |
+| `GET` | `/mcq/applications/:id/result` | Recruiter (owner) | One candidate's score, breakdown and signals |
+| `GET` | `/mcq/applications/:id` | Candidate | Assessment overview |
+| `POST` | `/mcq/applications/:id/start` | Candidate | Start, or resume, the assessment |
+| `GET` | `/mcq/attempts/:id` | Candidate | The paper with saved selections |
+| `PUT` | `/mcq/attempts/:id/answers/:questionId` | Candidate | Autosave an answer |
+| `POST` | `/mcq/attempts/:id/submit` | Candidate | Submit and grade |
+| `POST` | `/mcq/attempts/:id/events` | Candidate | Report a tab switch or copy |
+
+</details>
+
+<details>
 <summary><strong>Health</strong></summary>
 
 | Method | Endpoint | Access | Description |
@@ -394,6 +421,12 @@ erDiagram
     InterviewQuestion ||--o| InterviewAnswer : "has answer"
     InterviewSession ||--o{ ProctoringEvent : "logs events"
     InterviewSession ||--o| Report : "generates"
+    Resume ||--o{ ResumeChunk : "split into"
+    JobPosting ||--o| McqTest : "has assessment"
+    McqTest ||--o{ McqQuestion : "question pool"
+    Application ||--o| McqAttempt : "takes"
+    McqAttempt ||--o{ McqAttemptQuestion : "frozen paper"
+    McqAttempt ||--o{ McqEvent : "logs events"
 ```
 
 ---

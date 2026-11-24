@@ -13,8 +13,10 @@ import CandidateDashboard from "./pages/candidate/DashboardPage";
 import JobDetailsPage from "./pages/candidate/JobDetailsPage";
 import JobsPage from "./pages/candidate/JobsPage";
 import MyApplicationsPage from "./pages/candidate/MyApplicationsPage";
+import AssessmentPage from "./pages/assessment/AssessmentPage";
 import InterviewPage from "./pages/interview/InterviewPage";
 import ApplicantDetailPage from "./pages/recruiter/ApplicantDetailPage";
+import AssessmentBuilderPage from "./pages/recruiter/AssessmentBuilderPage";
 import ApplicantsPage from "./pages/recruiter/ApplicantsPage";
 import RecruiterDashboard from "./pages/recruiter/DashboardPage";
 
@@ -37,6 +39,7 @@ export default function App() {
             <Route path="/candidate/jobs/:jobId" element={<JobDetailsPage />} />
             <Route path="/candidate/applications" element={<MyApplicationsPage />} />
             <Route path="/candidate/interview/:applicationId" element={<InterviewPage />} />
+            <Route path="/candidate/assessment/:applicationId" element={<AssessmentPage />} />
           </Route>
         </Route>
 
@@ -45,6 +48,7 @@ export default function App() {
             <Route path="/recruiter/dashboard" element={<RecruiterDashboard />} />
             <Route path="/recruiter/jobs/:jobId/applicants" element={<ApplicantsPage />} />
             <Route path="/recruiter/applications/:applicationId" element={<ApplicantDetailPage />} />
+            <Route path="/recruiter/jobs/:jobId/assessment" element={<AssessmentBuilderPage />} />
           </Route>
         </Route>
 

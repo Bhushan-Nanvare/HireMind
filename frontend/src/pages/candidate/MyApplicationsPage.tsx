@@ -16,6 +16,34 @@ import { formatDate } from "../../utils/format";
 import { useApiData } from "../../utils/useApiData";
 import { useDocumentTitle } from "../../utils/useDocumentTitle";
 
+function AssessmentSection({ application }: { application: MyApplication }) {
+  if (!application.jobPosting.mcqTest?.published && !application.mcqAttempt?.submittedAt) return null;
+  const path = `/candidate/assessment/${application.id}`;
+  const attempt = application.mcqAttempt;
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+      {attempt?.submittedAt ? (
+        <>
+          <Badge tone="blue">Assessment submitted</Badge>
+          <Link to={path} className={buttonSecondary}>
+            View
+          </Link>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-slate-600">
+            {attempt ? "Your assessment is in progress." : "This job has a multiple-choice assessment."}
+          </p>
+          <Link to={path} className={buttonPrimary}>
+            {attempt ? "Continue assessment" : "Take the assessment"}
+          </Link>
+        </>
+      )}
+    </div>
+  );
+}
+
 function InterviewSection({ application }: { application: MyApplication }) {
   const session = application.interviewSession;
   const interviewPath = `/candidate/interview/${application.id}`;
@@ -114,6 +142,7 @@ export default function MyApplicationsPage() {
               <div className="mt-4 border-t border-slate-100 pt-4">
                 <InterviewSection application={application} />
               </div>
+              <AssessmentSection application={application} />
             </Card>
           </li>
         ))}

@@ -68,11 +68,16 @@ backend/
     uploads.ts                  # multer configs: resumeUpload, audioUpload
     prisma.ts                   # shared PrismaClient + isUniqueViolation()
     http.ts                     # getParam(): read a route param as a string
-    embeddings.ts               # every Gemini call (despite the name)
-  src/modules/<feature>/        # auth | jobs | resumes | applications | interviews
+    embeddings.ts               # every Gemini call (despite the name), plus the throttle and the fake driver
+    aiFake.ts                   # canned AI responses for AI_DRIVER=fake
+    chunk.ts, matching.ts       # splitting resumes into sections; best-matching-section scoring (shared with evals/)
+    csv.ts, similarity.ts       # CSV parsing; word-overlap similarity for transcript edits
+  src/modules/<feature>/        # auth | jobs | resumes | applications | interviews | mcq
     <feature>.routes.ts         # Router + middleware chain (auth, role, verified email, rate limit, upload)
     <feature>.controller.ts     # zod parse → service call → JSON envelope (no try/catch)
     <feature>.service.ts        # Prisma queries + business logic; throws HttpError
+  evals/                        # npm run eval: ranking quality (r-precision, NDCG) on a golden set
+  scripts/                      # backfill-embeddings.ts (refuses non-local databases without --force)
   uploads/{resumes,audio}/      # local storage driver's files (gitignored)
 frontend/
   src/main.tsx, src/App.tsx     # bootstrap + routes, grouped by role guard and AppLayout
@@ -162,6 +167,11 @@ docker-compose.yml              # local Postgres 16
 | `PATCH /applications/:id/status` | RECRUITER (owner) | Set `APPLIED`, `SHORTLISTED` or `REJECTED`; the last two email the candidate |
 | `GET /interviews/by-application/:applicationId` | CANDIDATE | `{ jobTitle, companyName, interview }`, where `interview` is null until started. Read-only, never calls Gemini |
 | `POST /interviews/start`, `GET /interviews/:sessionId`, `POST /interviews/:sessionId/answer`, `POST /interviews/:sessionId/answer-audio` (fields `questionId`, `audio`), `POST /interviews/:sessionId/proctoring` | CANDIDATE | Interview flow. `start` also resumes an interview that already exists |
+| `GET /jobs/:id/candidates` | RECRUITER (owner) | Every uploaded resume ranked against the job, with the matching resume section as evidence. No contact details unless the candidate applied |
+| `GET/PUT /mcq/jobs/:jobId/test`, `POST /mcq/jobs/:jobId/questions`, `POST /mcq/jobs/:jobId/questions/import` (`{ csv }`), `PUT/DELETE /mcq/questions/:id` | RECRUITER (owner) | Build the assessment: settings, question pool, bulk import. Questions are frozen once a candidate has started |
+| `GET /mcq/applications/:id/result` | RECRUITER (owner) | One candidate's score, topic breakdown, per-question review and signals |
+| `GET /mcq/applications/:id`, `POST /mcq/applications/:id/start` | CANDIDATE | Assessment overview / start it, or resume the one in progress |
+| `GET /mcq/attempts/:id`, `PUT /mcq/attempts/:id/answers/:questionId`, `POST /mcq/attempts/:id/submit`, `POST /mcq/attempts/:id/events` | CANDIDATE | Paper, autosave an answer, submit, report a tab switch or copy |
 | `GET /health` | public | Health check (not rate limited, not logged) |
 
 ### Core flows
@@ -176,28 +186,37 @@ docker-compose.yml              # local Postgres 16
   - Jobs with applicants and resumes used in an application can't be deleted, so application history stays intact.
 - **Interview** (`interviews.service.ts`, `TOTAL_QUESTIONS = 5`):
   - **State**: `startInterview` and `submitAnswer` both return an `InterviewState`: `{ session, question, totalQuestions, done, report }`. `question: null` with `done: false` means the next step failed to generate; the client retries by calling `/interviews/start` again.
-  - **Start or resume**: `startInterview` generates the first `medium` question before creating the session. If a session already exists, it calls `advanceSession` instead.
+  - **Start or resume**: `startInterview` creates the session with a fixed, unscored **warm-up** question (`orderIndex` 0, `isWarmUp`), so starting makes no AI call and can't fail halfway. The first scored question is generated after the warm-up is answered. An existing session goes through `advanceSession` instead. The warm-up exists to capture how the candidate speaks naturally.
   - **`advanceSession`**: returns the open question. Otherwise it generates the next question, or the final report once 5 answers exist. This also recovers sessions where an earlier request saved an answer and then failed.
   - **Each answer**:
-    - `evaluateAnswer` (0–10 plus feedback, both stored) and `analyzeAnswerAuthenticity` (0–100, answers of 30+ characters only) run **before** the answer is saved.
+    - `evaluateAnswer` returns the 0–10 score, feedback and a 0–100 AI-likeness estimate in **one** request (the estimate is kept only for answers of 30+ characters), **before** the answer is saved. The warm-up is never scored. A full interview costs about 11 generate calls.
     - A typing-speed check logs a `SUSPICIOUS_TYPING_SPEED` event when an answer over 50 characters was typed faster than 8 characters per second.
-    - Voice answers are uploaded to `/answer-audio`, transcribed by Gemini and then scored like typed answers. The recording and its MIME type are kept for the recruiter, and they skip the typing-speed check.
+    - **Conversation mode** (Chrome and Edge): the browser reads each question aloud and transcribes the spoken answer live (`utils/speech.ts`) while `MediaRecorder` keeps the audio. The transcript goes to `/answer-audio` with the recording, so Gemini is not asked to transcribe. The candidate can correct the transcript; `rawTranscript` is stored beside the submitted text and `voiceMetrics` records time to first word, speech rate and long pauses. Other browsers fall back to record-and-upload (Gemini transcribes), and typing is always available.
+    - **Server-detected signals**: `CANARY_TRIGGERED` (the answer repeats a word hidden in the question, rendered off-screen and `aria-hidden`), `TRANSCRIPT_HEAVILY_EDITED` (word similarity between heard and submitted text below 0.6), `ANSWER_TIME_EXCEEDED` (a soft 120s suggestion, never enforced). Recruiters see a word-level diff of heard versus submitted text.
   - **Next difficulty**: score ≥7 gives `hard`, ≤4 gives `easy`, anything else stays `medium`.
   - **After the 5th answer**: the `Report` and the `COMPLETED` status are saved in one nested update.
+- **Candidate pool** (`jobs.service.ts` → `searchCandidatePool`): resumes are split into sections (`shared/chunk.ts`) and each section is embedded. Chunk vectors live in a pgvector column with an HNSW cosine index and are searched with raw SQL, because Prisma can't query vector columns. Whole-resume and job vectors stay plain float arrays, since comparing one pair needs no index. Embeddings are 1536 dimensions rather than the model's default 3072 because HNSW indexes cap at 2000; `npm run eval` showed the truncation cost no ranking quality (mean r-precision 0.833 and NDCG 0.991, both unchanged).
+- **MCQ assessment** (`modules/mcq`, no AI): one assessment per job. The recruiter sets a time limit, how many questions each candidate draws, a pass mark and whether candidates see their score, then builds a pool by CSV import (header `question, A..F, correct, topic`; `correct` is a letter, or `A|C` for select-all; any bad row rejects the whole file with row numbers) or one question at a time.
+  - **Paper**: starting an attempt draws a random subset, shuffles question order and each question's option order, and stores it (`McqAttemptQuestion.optionOrder`). Reopening returns the identical paper. The client works in displayed positions and the server maps them back to original option indexes. The answer key is never sent to the candidate.
+  - **Time** is enforced by the server (`expiresAt`); the browser's countdown is cosmetic. There is no background job: any read of an expired attempt (the candidate's, or a recruiter opening results or the applicant list) grades it from the answers saved so far (`finalizeAttempt`, guarded by a conditional update so it happens once).
+  - **Answers** autosave on every change. A select-all question is right only when exactly the correct set is chosen. One attempt per application (unique constraint).
+  - **Signals**: `TAB_SWITCH` and `COPY_PASTE` come from the browser; `ANSWERED_TOO_FAST` (median gap under 3s with a score of 70% or more, over at least 5 answers) is derived on the server at grading.
+  - Questions can't be edited or deleted once any candidate has started, so recorded results stay explainable. Recruiters see the percentage of candidates who answered each question correctly.
 - **Proctoring** (`frontend/src/pages/interview/InterviewPage.tsx`) logs three events while a question is on screen:
   - `TAB_SWITCH` on `visibilitychange`
   - `COPY_PASTE` on document copy or paste
   - `PASTE_BLOCKED_IN_ANSWER` when a paste into the answer box is blocked
 
-  The API accepts only these three from clients; `SUSPICIOUS_TYPING_SPEED` is created server-side. Candidates agree to this on a pre-interview screen. Recruiters see counts and average AI-likeness (`utils/signals.ts`), labelled as signals for review, not conclusions.
+  The API accepts only these three from clients; the other signals are created server-side. Candidates agree to this on a pre-interview screen. Recruiters see counts and average AI-likeness (`utils/signals.ts`), labelled as signals for review, not conclusions.
 - **Email** (`shared/email.ts`, `shared/emailTemplates.ts`):
   - Sign-up and resend-verification send a verification link; forgot-password sends a reset link; shortlisting or rejecting sends the candidate a status email (moving back to `APPLIED` doesn't).
   - All of these use `sendEmailInBackground`, so a failed email never fails the request. Links point at `APP_URL`.
 - **Gemini calls** (`shared/embeddings.ts`):
   - `generateJson` asks for JSON mode with a JSON Schema built from zod (`z.toJSONSchema`), then validates the reply with the same schema.
-  - `withRetries` makes up to 3 attempts. It retries 5xx errors, network errors and invalid output with exponential backoff. For 429s it waits the `retryDelay` Gemini returns, but gives up if that's over 20s or if the daily quota is exhausted. Other 4xx errors (bad key, unknown model) fail immediately.
+  - `withRetries` makes up to 3 attempts. It retries 5xx errors, network errors and invalid output with exponential backoff. For 429s it waits the `retryDelay` Gemini returns, but gives up if that's over 65s or if the daily quota is exhausted. Other 4xx errors (bad key, unknown model) fail immediately.
   - Final failures throw `AiServiceError`, whose message is safe to show users.
-  - `analyzeAnswerAuthenticity` returns `null` instead of throwing.
+  - Generation calls pass a token-bucket throttle (`GEMINI_GENERATE_RPM`, default 5) so a burst queues instead of failing.
+  - `AI_DRIVER=fake` makes every function in `embeddings.ts` return canned data from `aiFake.ts` (embeddings are word-overlap vectors, so match scores stay plausible). Env validation refuses it in production.
 
 ### Data model (`backend/prisma/schema.prisma`)
 - **User** (`role`, `emailVerifiedAt`, `passwordChangedAt`) has one **Candidate** or one **Recruiter**, and **AuthToken**[] (one-time email tokens)
@@ -205,7 +224,8 @@ docker-compose.yml              # local Postgres 16
   - Candidate → **Resume**[] (with original `fileName`) and **Application**[]
 - **Application** (unique on `candidateId` + `jobId`) → **SkillGap**[] and one **InterviewSession**
 - **InterviewSession** → **InterviewQuestion**[] (unique on `sessionId` + `orderIndex`; each with one **InterviewAnswer** holding `score`, `feedback`, `aiLikelihoodScore` and optional `audioUrl` / `audioMimeType`), **ProctoringEvent**[] and one **Report**
-- **Resume** and **JobPosting** store embeddings as `Float[]` columns
+- **Resume** and **JobPosting** store embeddings as `Float[]` columns; **ResumeChunk** (`text`, `orderIndex`, pgvector `embedding vector(1536)` with an HNSW index) holds per-section vectors
+- **McqTest** (one per **JobPosting**) → **McqQuestion**[] (`options`, `correct` indexes, `topic`, `position`) and **McqAttempt**[] (one per **Application**: `expiresAt`, `submittedAt`, `score`, `total`) → **McqAttemptQuestion**[] (the frozen paper: `orderIndex`, `optionOrder`, `selected`, `answeredAt`) and **McqEvent**[]
 - JobPosting, Resume, Application and InterviewAnswer have `createdAt`; JobPosting and Application also have `updatedAt`
 - **Delete rules**: every relation cascades, so deleting a `User` removes their profile, jobs, resumes, applications and interviews. The product rules (a job with applicants, or a resume used in an application, can't be deleted) are enforced in the services, not the database.
 - **Indexes**: foreign-key columns are indexed (Postgres doesn't do it automatically), plus `JobPosting(status, createdAt)` for the public job list.
@@ -216,15 +236,16 @@ docker-compose.yml              # local Postgres 16
 - `JobStatus`: `OPEN` | `CLOSED`
 - `ApplicationStatus`: `APPLIED` | `SHORTLISTED` | `REJECTED`
 - `InterviewStatus`: `PENDING` | `IN_PROGRESS` | `COMPLETED`
-- `ProctoringEventType`: `TAB_SWITCH` | `COPY_PASTE` | `PASTE_BLOCKED_IN_ANSWER` | `SUSPICIOUS_TYPING_SPEED`
+- `ProctoringEventType`: `TAB_SWITCH` | `COPY_PASTE` | `PASTE_BLOCKED_IN_ANSWER` | `SUSPICIOUS_TYPING_SPEED` | `CANARY_TRIGGERED` | `ANSWER_TIME_EXCEEDED` | `TRANSCRIPT_HEAVILY_EDITED` | `SPEECH_PATTERN_ANOMALY` (declared, not yet written)
+- `McqEventType`: `TAB_SWITCH` | `COPY_PASTE` | `ANSWERED_TOO_FAST`
 
 Values the model produces stay strings, since Gemini could return something new: `InterviewQuestion.difficulty` (`easy` | `medium` | `hard`) and `SkillGap.importance` (`high` | `medium` | `low`).
 
 ### Frontend
 - **Routes** (`App.tsx`):
   - Public: `/` (landing), `/login`, `/signup` (`?role=RECRUITER` preselects) and `/forgot-password` are `GuestOnly`, which sends signed-in users to their dashboard. `/reset-password` and `/verify-email` (email links) work whether or not you're signed in. Anything else shows `NotFoundPage`.
-  - Candidate (`RequireAuth role="CANDIDATE"`): `/candidate/dashboard`, `/candidate/jobs`, `/candidate/jobs/:jobId`, `/candidate/applications`, `/candidate/interview/:applicationId`.
-  - Recruiter (`RequireAuth role="RECRUITER"`): `/recruiter/dashboard`, `/recruiter/jobs/:jobId/applicants`, `/recruiter/applications/:applicationId`.
+  - Candidate (`RequireAuth role="CANDIDATE"`): `/candidate/dashboard`, `/candidate/jobs`, `/candidate/jobs/:jobId`, `/candidate/applications`, `/candidate/interview/:applicationId`, `/candidate/assessment/:applicationId`.
+  - Recruiter (`RequireAuth role="RECRUITER"`): `/recruiter/dashboard`, `/recruiter/jobs/:jobId/applicants`, `/recruiter/jobs/:jobId/assessment`, `/recruiter/applications/:applicationId`.
   - Signed-out users go to `/login` and come back afterwards (via `location.state.from`). Guards are UX only: the backend enforces auth and roles on every request.
 - **AppLayout** wraps every signed-in page: it loads `/auth/me` into `authStore.profile`, and renders the navbar and, until the email is verified, `VerifyEmailBanner`.
 - **Session**: the role comes from the JWT payload (`readSession` also checks expiry and clears expired tokens). `useAuthHydrated()` waits for the persisted store. The axios response interceptor signs out and redirects to `/login` on any 401 except a failed login.
@@ -250,7 +271,7 @@ cd backend
 npm install
 npx prisma generate        # required after install and after any schema change
 npx prisma migrate deploy  # apply migrations to the DB in DATABASE_URL
-npm run seed               # optional demo accounts, jobs and a finished interview
+npm run seed               # optional demo accounts, jobs, a finished interview and a published assessment
 npm run dev                # tsx watch src/server.ts → http://localhost:5000
 npm test                   # vitest (needs a test database, see below)
 npm run typecheck          # src, then tests + seed + config
@@ -265,14 +286,16 @@ npm run build              # tsc -b && vite build
 npm run lint               # oxlint
 ```
 
-`npm run seed` creates `demo-recruiter@hiremind.test` and `demo-candidate@hiremind.test`, password `demo-password-123`, both verified, with one finished interview and one still to take. It refuses to run with `NODE_ENV=production` unless passed `--force`.
+`npm run seed` creates `demo-recruiter@hiremind.test` and `demo-candidate@hiremind.test`, password `demo-password-123`, both verified, with one finished interview and assessment, and one application with both still to take. It refuses to run with `NODE_ENV=production` unless passed `--force`.
+
+**No Gemini quota needed:** run the backend with `AI_DRIVER=fake` for unlimited local use and rehearsals. After changing embedding dimensions or moving a database, `npm run backfill:embeddings` re-embeds everything (local databases only, unless `--force`).
 
 **Health check**: `GET http://localhost:5000/api/health` returns `{"status":"ok"}`.
 
 ## Testing and type-checking
 - **Backend tests**: `npm test` runs Vitest + Supertest against a real Postgres, with Gemini and email mocked, so they need no keys and cost nothing.
   ```bash
-  docker run --rm -d --name hiremind-test-db -e POSTGRES_USER=hiremind -e POSTGRES_PASSWORD=hiremind_test -e POSTGRES_DB=hiremind_test -p 55432:5432 postgres:16
+  docker run --rm -d --name hiremind-test-db -e POSTGRES_USER=hiremind -e POSTGRES_PASSWORD=hiremind_test -e POSTGRES_DB=hiremind_test -p 55432:5432 pgvector/pgvector:pg16
   cd backend && DATABASE_URL=postgresql://hiremind:hiremind_test@localhost:55432/hiremind_test npm test
   ```
   - `tests/globalSetup.ts` applies migrations and refuses any database whose name doesn't contain "test". `resetDatabase()` truncates between tests, and files run one at a time.

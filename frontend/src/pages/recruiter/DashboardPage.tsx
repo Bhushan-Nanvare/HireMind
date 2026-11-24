@@ -188,6 +188,9 @@ export default function RecruiterDashboardPage() {
                       <button onClick={() => setEditingId(job.id)} className={buttonSecondary}>
                         Edit
                       </button>
+                      <Link to={`/recruiter/jobs/${job.id}/assessment`} className={buttonSecondary}>
+                        Assessment
+                      </Link>
                       <button onClick={() => handleToggleStatus(job)} disabled={busyId === job.id} className={buttonSecondary}>
                         {job.status === "OPEN" ? "Close job" : "Reopen job"}
                       </button>
